@@ -1,0 +1,97 @@
+{
+  "name": "mlb-analytics",
+  "version": "1.0.0",
+  "description": "MLB Analytics Platform — AI-powered baseball intelligence",
+  "main": "main.js",
+  "author": "Your Name",
+  "scripts": {
+    "dev":          "node dev.js",
+    "build":        "electron-builder",
+    "build:mac":    "electron-builder --mac",
+    "build:win":    "electron-builder --win",
+    "build:linux":  "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-log": "^5.1.2"
+  },
+  "devDependencies": {
+    "electron":         "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId":       "com.yourname.mlb-analytics",
+    "productName": "MLB Analytics",
+    "copyright":   "Copyright © 2026",
+
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "setup.html",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+
+    "extraResources": [
+      {
+        "comment": "PyInstaller-built backend binary",
+        "from": "../backend/dist/mlb-backend",
+        "to":   "mlb-backend"
+      },
+      {
+        "comment": "Next.js standalone server + static files",
+        "from": "../frontend/.next/standalone",
+        "to":   "frontend/.next/standalone"
+      },
+      {
+        "from": "../frontend/.next/static",
+        "to":   "frontend/.next/standalone/.next/static"
+      },
+      {
+        "from": "../frontend/public",
+        "to":   "frontend/.next/standalone/public"
+      }
+    ],
+
+    "mac": {
+      "category": "public.app-category.sports",
+      "icon":     "assets/icon.icns",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements":           "assets/entitlements.mac.plist",
+      "entitlementsInherit":    "assets/entitlements.mac.plist"
+    },
+
+    "win": {
+      "icon":   "assets/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+
+    "linux": {
+      "icon":   "assets/icon.png",
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ]
+    },
+
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+
+    "dmg": {
+      "title": "MLB Analytics",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
+  }
+}

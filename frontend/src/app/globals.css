@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 3 7 18;
+    --foreground: 248 250 252;
+  }
+}
+
+@layer components {
+  .stat-card {
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-4;
+  }
+  .badge-grade {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-bold;
+  }
+}

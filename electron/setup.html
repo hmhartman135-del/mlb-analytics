@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MLB Analytics — Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 40px 36px 32px;
+      gap: 24px;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    .header { text-align: center; }
+
+    .logo {
+      font-size: 36px;
+      font-weight: 900;
+      background: linear-gradient(135deg, #3b82f6, #06b6d4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+    }
+    .subtitle { font-size: 13px; color: #64748b; }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .step-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #3b82f6;
+      margin-bottom: 6px;
+    }
+
+    h2 { font-size: 15px; font-weight: 600; color: #f1f5f9; margin-bottom: 8px; }
+    p  { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+
+    a { color: #3b82f6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .input-group { margin-top: 14px; }
+    label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
+
+    input {
+      -webkit-app-region: no-drag;
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #f1f5f9;
+      font-size: 13px;
+      font-family: monospace;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #3b82f6; }
+    input::placeholder { color: #475569; }
+
+    .error {
+      display: none;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #f87171;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      -webkit-app-region: no-drag;
+    }
+
+    button {
+      -webkit-app-region: no-drag;
+      cursor: pointer;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 12px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+
+    .hint {
+      text-align: center;
+      font-size: 11px;
+      color: #475569;
+    }
+    .hint a { color: #64748b; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">⚾ MLB Analytics</div>
+    <div class="subtitle">One-time setup — takes 30 seconds</div>
+  </div>
+
+  <div class="card">
+    <div class="step-label">Step 1 of 1 — AI Features</div>
+    <h2>Enter your Anthropic API key</h2>
+    <p>
+      This app uses <a href="#" id="anthropic-link">Claude AI</a> for draft simulations,
+      trade analysis, and lineup optimization. You need a free Anthropic account to get a key.
+    </p>
+    <p style="margin-top: 8px;">
+      Get yours at <a href="#" id="console-link">console.anthropic.com</a> →
+      API Keys → Create key.
+    </p>
+
+    <div class="input-group">
+      <label for="key-input">Anthropic API Key</label>
+      <input
+        id="key-input"
+        type="password"
+        placeholder="sk-ant-api03-…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div class="error" id="error-msg"></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary" id="save-btn" disabled>Launch MLB Analytics →</button>
+  </div>
+
+  <div class="hint">
+    Your key is stored securely on this device using the OS keychain.<br/>
+    <a href="#" id="logs-link">View logs</a>
+  </div>
+
+  <script>
+    const { electronApp } = window;  // exposed by preload.js
+
+    const input   = document.getElementById("key-input");
+    const saveBtn = document.getElementById("save-btn");
+    const errorEl = document.getElementById("error-msg");
+
+    // Enable button once input looks like a key
+    input.addEventListener("input", () => {
+      saveBtn.disabled = !input.value.trim().startsWith("sk-ant-");
+      errorEl.style.display = "none";
+    });
+
+    // Open external links in browser
+    document.getElementById("anthropic-link").addEventListener("click", e => {
+      e.preventDefault();
+      window.electronApp.openExternal("https://www.anthropic.com");
+    });
+    document.getElementById("console-link").addEventListener("click", e => {
+      e.preventDefault();
+      window.electronApp.openExternal("https://console.anthropic.com/settings/keys");
+    });
+    document.getElementById("logs-link").addEventListener("click", e => {
+      e.preventDefault();
+      window.electronApp.openLogs();
+    });
+
+    saveBtn.addEventListener("click", async () => {
+      const key = input.value.trim();
+      if (!key) return;
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
+
+      const result = await window.electronApp.saveApiKey(key);
+      if (!result.ok) {
+        errorEl.textContent = result.error;
+        errorEl.style.display = "block";
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Launch MLB Analytics →";
+        return;
+      }
+
+      saveBtn.textContent = "Starting app…";
+      await window.electronApp.setupComplete();
+    });
+
+    // Allow Enter key
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !saveBtn.disabled) saveBtn.click();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy this file to app-config.json and fill in your credentials. NEVER commit app-config.json to git.",
+
+  "database_url": "postgresql+asyncpg://postgres.YOURPROJECT:PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres",
+
+  "anthropic_api_key": ""
+}
