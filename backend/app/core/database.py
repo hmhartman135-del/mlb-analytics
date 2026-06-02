@@ -1,23 +1,32 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from .config import get_settings
 
-settings = get_settings()
 
-# Railway injects DATABASE_URL as postgresql:// — asyncpg needs postgresql+asyncpg://
-def _fix_url(url: str) -> str:
+def _make_async_url(url: str) -> str:
+    """
+    Convert any Postgres URL variant to the asyncpg driver format.
+    Railway provides: postgres://... or postgresql://...
+    SQLAlchemy asyncpg needs: postgresql+asyncpg://...
+    """
+    url = url.strip()
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+asyncpg://", 1)
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        url = "postgresql+asyncpg://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
     return url
 
-database_url = _fix_url(os.getenv("DATABASE_URL", settings.database_url))
+
+# Read directly from environment — bypass pydantic entirely to avoid validation errors
+_raw = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://postgres:password@localhost:5432/mlb_analytics"
+)
+DATABASE_URL = _make_async_url(_raw)
 
 engine = create_async_engine(
-    database_url,
-    echo=settings.debug,
+    DATABASE_URL,
+    echo=False,
     pool_size=5,
     max_overflow=10,
 )
