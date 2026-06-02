@@ -25,10 +25,12 @@ if getattr(sys, "frozen", False):
         from dotenv import load_dotenv
         load_dotenv(_env_path, override=False)
 
+# Export app at module level so `uvicorn server:app` works (used by Railway)
+from app.main import app  # noqa: E402
+
 # ── Start uvicorn ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    from app.main import app  # imported after path setup
 
     port = int(os.environ.get("BACKEND_PORT", 8000))
     print(f"[backend] Starting on http://127.0.0.1:{port}", flush=True)
