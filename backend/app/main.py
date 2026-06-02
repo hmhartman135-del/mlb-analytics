@@ -69,3 +69,14 @@ app.include_router(sync.router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "MLB Analytics Platform"}
+
+
+@app.get("/")
+async def root():
+    return {
+        "service": "MLB Analytics Platform API",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health",
+        "note": "Open the Vercel frontend URL to use the app — this is the API backend only."
+    }
