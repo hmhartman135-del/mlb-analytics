@@ -4,6 +4,7 @@ sqlalchemy[asyncio]
 alembic
 asyncpg
 greenlet
+redis
 httpx
 python-dotenv
 pydantic
