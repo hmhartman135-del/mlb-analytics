@@ -22,9 +22,9 @@ async def _background_sync():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Run DB setup in the background so /health responds immediately.
-    # If the DB is slow or unreachable, the app still starts and serves requests.
+    # Both tasks run in background — app starts immediately regardless of DB speed.
     async def _setup_db():
+        await asyncio.sleep(2)          # give uvicorn a moment to bind the port
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
@@ -33,9 +33,9 @@ async def lifespan(app: FastAPI):
                         "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
                     )
                 )
-            logger.info("Database tables ready")
+            logger.info("DB tables ready")
         except Exception as exc:
-            logger.warning("DB setup failed (will retry on first request): %s", exc)
+            logger.warning("DB setup skipped: %s", exc)
 
     asyncio.create_task(_setup_db())
     asyncio.create_task(_background_sync())
@@ -77,7 +77,14 @@ app.include_router(sync.router)
 
 @app.get("/health")
 async def health():
+    """Intentionally does NOT touch the database — always responds immediately."""
     return {"status": "ok", "service": "MLB Analytics Platform"}
+
+
+@app.get("/healthz")
+async def healthz():
+    """Kubernetes-style alias — also DB-free."""
+    return {"status": "ok"}
 
 
 @app.get("/")
