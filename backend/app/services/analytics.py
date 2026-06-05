@@ -2,8 +2,6 @@
 Advanced MLB metrics calculation engine.
 wOBA weights sourced from FanGraphs annual constants.
 """
-import pandas as pd
-import numpy as np
 from typing import Any
 
 
@@ -103,15 +101,14 @@ def calculate_platoon_advantage(batter_hand: str, pitcher_hand: str) -> dict:
     return {"advantage": "neutral", "woba_delta": 0.0}  # switch hitter
 
 
-def rank_players_by_position(players_df: pd.DataFrame, position: str, metric: str = "woba") -> pd.DataFrame:
-    """Returns players at a position ranked by metric descending."""
-    pos_df = players_df[
-        players_df["position"].str.contains(position, na=False)
-        | players_df["secondary_positions"].apply(
-            lambda x: position in (x or [])
-        )
-    ].copy()
-    return pos_df.sort_values(metric, ascending=False).reset_index(drop=True)
+def rank_players_by_position(players: list[dict], position: str, metric: str = "woba") -> list[dict]:
+    """Returns players at a position ranked by metric descending (pure Python, no pandas)."""
+    filtered = [
+        p for p in players
+        if (position in (p.get("position") or ""))
+        or (position in (p.get("secondary_positions") or []))
+    ]
+    return sorted(filtered, key=lambda p: p.get(metric) or 0, reverse=True)
 
 
 def value_contract(salary_millions: float, war: float, dollars_per_war: float = 8.0) -> dict:
