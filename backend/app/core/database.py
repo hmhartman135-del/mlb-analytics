@@ -39,8 +39,14 @@ engine = create_async_engine(
     echo=False,
     pool_size=5,
     max_overflow=10,
-    connect_args={"timeout": 10},
+    pool_timeout=30,
+    pool_recycle=1800,
     pool_pre_ping=True,
+    connect_args={
+        "timeout": 10,
+        "command_timeout": 30,
+        "server_settings": {"application_name": "mlb-analytics"},
+    },
 )
 
 AsyncSessionLocal = async_sessionmaker(

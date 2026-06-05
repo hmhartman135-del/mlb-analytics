@@ -22,13 +22,22 @@ async def _background_sync():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            __import__("sqlalchemy").text(
-                "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
-            )
-        )
+    # Run DB setup in the background so /health responds immediately.
+    # If the DB is slow or unreachable, the app still starts and serves requests.
+    async def _setup_db():
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(
+                    __import__("sqlalchemy").text(
+                        "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
+                    )
+                )
+            logger.info("Database tables ready")
+        except Exception as exc:
+            logger.warning("DB setup failed (will retry on first request): %s", exc)
+
+    asyncio.create_task(_setup_db())
     asyncio.create_task(_background_sync())
     yield
 
