@@ -1,5 +1,4 @@
 import os
-import asyncio
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,34 +10,21 @@ from .models import spotrac_fa  # noqa — ensures table is registered with Base
 logger = logging.getLogger(__name__)
 
 
-async def _background_sync():
-    """Run data sync in background so /health passes immediately on startup."""
-    await asyncio.sleep(5)
-    try:
-        await sync.maybe_auto_sync()
-    except Exception as exc:
-        logger.warning("Background startup sync failed (hit /sync to retry): %s", exc)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Both tasks run in background — app starts immediately regardless of DB speed.
-    async def _setup_db():
-        await asyncio.sleep(2)          # give uvicorn a moment to bind the port
-        try:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-                await conn.execute(
-                    __import__("sqlalchemy").text(
-                        "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
-                    )
+    # Minimal startup — just ensure tables exist, no background sync on boot.
+    # The /api/v1/sync/run endpoint handles syncing on demand.
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
                 )
-            logger.info("DB tables ready")
-        except Exception as exc:
-            logger.warning("DB setup skipped: %s", exc)
-
-    asyncio.create_task(_setup_db())
-    asyncio.create_task(_background_sync())
+            )
+        logger.info("DB ready")
+    except Exception as exc:
+        logger.warning("DB setup skipped at startup: %s", exc)
     yield
 
 
