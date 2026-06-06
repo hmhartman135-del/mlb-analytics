@@ -3,7 +3,6 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from .core.database import engine, Base
 from .api.routes import players, lineups, roster, scouting, analytics, teams, free_agency, standings, offseason, draft, trades, sync
 from .models import spotrac_fa  # noqa — ensures table is registered with Base metadata
 
@@ -12,25 +11,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # DB setup runs in a background task so it NEVER blocks startup.
-    # Railway health check passes immediately; tables are ready within seconds.
-    import asyncio
-
-    async def _setup_db():
-        try:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-                await conn.execute(
-                    __import__("sqlalchemy").text(
-                        "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
-                    )
-                )
-            logger.info("DB tables ready")
-        except Exception as exc:
-            logger.warning("DB setup error (non-fatal): %s", exc)
-
-    asyncio.create_task(_setup_db())
+    # Pure yield — no DB operations at startup.
+    # Tables already exist on Railway; this ensures INSTANT startup every time.
+    print("[startup] MLB Analytics API starting…", flush=True)
+    print(f"[startup] DATABASE_URL configured: {'yes' if os.getenv('DATABASE_URL') else 'no (local default)'}", flush=True)
     yield
+    print("[shutdown] MLB Analytics API shutting down.", flush=True)
 
 
 app = FastAPI(
