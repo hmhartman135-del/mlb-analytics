@@ -12,19 +12,24 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Minimal startup — just ensure tables exist, no background sync on boot.
-    # The /api/v1/sync/run endpoint handles syncing on demand.
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                __import__("sqlalchemy").text(
-                    "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
+    # DB setup runs in a background task so it NEVER blocks startup.
+    # Railway health check passes immediately; tables are ready within seconds.
+    import asyncio
+
+    async def _setup_db():
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(
+                    __import__("sqlalchemy").text(
+                        "ALTER TABLE players ADD COLUMN IF NOT EXISTS roster_status VARCHAR(16)"
+                    )
                 )
-            )
-        logger.info("DB ready")
-    except Exception as exc:
-        logger.warning("DB setup skipped at startup: %s", exc)
+            logger.info("DB tables ready")
+        except Exception as exc:
+            logger.warning("DB setup error (non-fatal): %s", exc)
+
+    asyncio.create_task(_setup_db())
     yield
 
 

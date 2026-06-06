@@ -95,6 +95,49 @@ async def _fetch(http: httpx.AsyncClient, path: str, params: dict | None = None)
 
 # ── Core sync logic ───────────────────────────────────────────────────────────
 
+async def _seed_teams(http: httpx.AsyncClient) -> int:
+    """Fetch all 30 MLB teams from statsapi.mlb.com and insert into DB.
+    Returns number of teams inserted/updated."""
+    data = await _fetch(http, "teams", {"sportId": 1, "season": SEASON})
+    teams_upserted = 0
+    async with AsyncSessionLocal() as session:
+        for t in data.get("teams", []):
+            mlb_id = _int(t.get("id"))
+            if not mlb_id:
+                continue
+            city = t.get("locationName") or t.get("franchiseName") or ""
+            name = t.get("teamName") or t.get("name") or f"Team {mlb_id}"
+            abbr = t.get("abbreviation") or name[:3].upper()
+            lg_name = (t.get("league") or {}).get("name") or ""
+            div_name = (t.get("division") or {}).get("name") or ""
+            # AL / NL abbreviation
+            league = "AL" if "American" in lg_name else ("NL" if "National" in lg_name else lg_name[:2])
+
+            # Check if team already exists
+            res = await session.execute(select(Team).where(Team.mlb_id == mlb_id))
+            existing = res.scalar_one_or_none()
+            if existing:
+                existing.city = city
+                existing.name = name
+                existing.abbreviation = abbr
+                existing.league = league
+                existing.division = div_name
+                existing.level = "MLB"
+            else:
+                session.add(Team(
+                    mlb_id=mlb_id,
+                    city=city,
+                    name=name,
+                    abbreviation=abbr,
+                    league=league,
+                    division=div_name,
+                    level="MLB",
+                ))
+            teams_upserted += 1
+        await session.commit()
+    return teams_upserted
+
+
 async def _sync_all() -> None:
     """Refresh rosters + stats for all 30 MLB teams. Updates _state in-place."""
     if _lock.locked():
@@ -109,12 +152,23 @@ async def _sync_all() -> None:
 
         try:
             async with httpx.AsyncClient() as http:
-                # ── get all MLB teams from DB ──────────────────────────────
+                # ── ensure teams exist; seed from MLB API if DB is empty ───
                 async with AsyncSessionLocal() as session:
                     res = await session.execute(
                         select(Team).where(Team.level == "MLB", Team.mlb_id.isnot(None))
                     )
                     mlb_teams = res.scalars().all()
+
+                if not mlb_teams:
+                    print("[sync] No teams in DB — seeding from MLB Stats API…")
+                    seeded = await _seed_teams(http)
+                    print(f"[sync] Seeded {seeded} teams")
+                    # Re-fetch after seeding
+                    async with AsyncSessionLocal() as session:
+                        res = await session.execute(
+                            select(Team).where(Team.level == "MLB", Team.mlb_id.isnot(None))
+                        )
+                        mlb_teams = res.scalars().all()
 
                 for team in mlb_teams:
                     try:
