@@ -158,11 +158,11 @@ def check_api_keys():
 
     if not ant_ok:
         print()
-        print(f"  {yellow('Open this file in TextEdit, paste your Anthropic key, then press Enter:')}")
+        print(f"  {yellow('Opening .env file — paste your Anthropic API key and save, then re-run this script.')}")
         print(f"  {dim(str(ENV_FILE))}")
         subprocess.run(["open", "-e", str(ENV_FILE)])
-        input("\n  Press Enter once you have saved the file… ")
-        return check_api_keys()   # re-check
+        print(f"  {red('Exiting — re-run start.py after saving the key.')}")
+        sys.exit(1)
 
 
 # ── step 3: install python deps ───────────────────────────────────────────────
@@ -233,24 +233,16 @@ def _read_env_vars() -> dict:
 
 def decide_data_load() -> bool:
     """
-    Ask the user whether to load/reload data.
-    Returns True if we should run the data load, False to skip.
-    This runs BEFORE launching servers so we can start loading right away.
+    Automatically decide whether to load data — no user input required.
+    Returns True if data should be loaded, False if it already exists.
     """
     header("Step 6 — Player data")
 
     if DATA_SENTINEL.exists():
         print()
-        print(f"  {green('✓')}  Player data was loaded previously.")
-        answer = input(
-            f"  Press {bold('Enter')} to use existing data  (or type {bold('reload')} to refresh): "
-        ).strip().lower()
-        if answer != "reload":
-            ok("Using existing data")
-            return False
-        print()
-        info("Will reload all data after launching the app…")
-        return True
+        ok("Player data already loaded — skipping data load")
+        print(dim("  To force a reload, delete the file:  " + str(DATA_SENTINEL)))
+        return False
     else:
         print()
         info("No data loaded yet — will load all 30 MLB teams + minor leagues after launch.")
