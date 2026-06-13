@@ -33,7 +33,7 @@ POS_MAP = {
     "TWP": "SP", "P": "SP", "SP": "SP", "RP": "RP",
     "C": "C", "1B": "1B", "2B": "2B", "3B": "3B",
     "SS": "SS", "LF": "LF", "CF": "CF", "RF": "RF",
-    "OF": "RF", "DH": "DH", "IF": "3B", "UTIL": "DH",
+    "OF": "CF", "DH": "DH", "IF": "3B", "UTIL": "DH",
 }
 
 
