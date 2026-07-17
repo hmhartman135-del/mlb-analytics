@@ -7,7 +7,7 @@ from uuid import UUID
 from ...core.database import get_db
 from ...models.player import Player
 from ...models.stats import BattingStats, PitchingStats
-from ...services.scouting import generate_scouting_report
+from ...services.scouting import generate_scouting_report, generate_player_bio_analysis
 
 router = APIRouter(prefix="/scouting", tags=["scouting"])
 
@@ -242,14 +242,9 @@ async def list_prospects(
 
 # ── Player career history ─────────────────────────────────────────────────────
 
-@router.get("/player/{player_id}/history")
-async def player_career_history(
-    player_id: UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Returns player bio + full career stats (DB rows first, then MLB API year-by-year).
-    """
+async def _load_career_history(player_id: UUID, db: AsyncSession) -> tuple[Player, dict, list, list]:
+    """Shared by /history and /ai-bio — player row + bio dict + DB stat history
+    + MLB API year-by-year (majors and minors)."""
     result = await db.execute(select(Player).where(Player.id == player_id))
     player = result.scalar_one_or_none()
     if not player:
@@ -378,10 +373,35 @@ async def player_career_history(
         except Exception:
             pass
 
+    return player, bio, db_history, api_history
+
+
+@router.get("/player/{player_id}/history")
+async def player_career_history(
+    player_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns player bio + full career stats (DB rows first, then MLB API year-by-year).
+    """
+    _player, bio, db_history, api_history = await _load_career_history(player_id, db)
     return {
         "player": bio,
         "db_history": db_history,
         "minor_league_history": api_history,
+    }
+
+
+@router.post("/player/{player_id}/ai-bio")
+async def player_ai_bio(player_id: UUID, db: AsyncSession = Depends(get_db)):
+    """AI-written background/career/strengths/concerns profile, grounded in the
+    player's real multi-year, multi-level stat history (see /history)."""
+    player, bio, db_history, api_history = await _load_career_history(player_id, db)
+    sections = await generate_player_bio_analysis(bio, db_history, api_history)
+    return {
+        "player_id": str(player.id),
+        "player_name": player.full_name,
+        **sections,
     }
 
 

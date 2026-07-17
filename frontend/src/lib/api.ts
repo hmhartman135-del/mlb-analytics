@@ -486,6 +486,17 @@ export const scoutingApi = {
 
   playerHistory: (playerId: string) =>
     api.get<PlayerHistoryResponse>(`/scouting/player/${playerId}/history`),
+
+  aiBio: (playerId: string) =>
+    api.post<{
+      player_id: string;
+      player_name: string;
+      background: string;
+      career: string;
+      current: string;
+      likes: string;
+      concerns: string;
+    }>(`/scouting/player/${playerId}/ai-bio`),
 };
 
 // --- Analytics API ---

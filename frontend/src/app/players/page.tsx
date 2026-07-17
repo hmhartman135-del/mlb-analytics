@@ -1,9 +1,9 @@
 "use client";
 import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { playersApi, type LeagueRosterPlayer } from "@/lib/api";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { playersApi, scoutingApi, type LeagueRosterPlayer, type PlayerHistoryResponse } from "@/lib/api";
 import { SyncBar } from "@/components/ui/SyncBar";
-import { Users, Search, X } from "lucide-react";
+import { Users, Search, X, Sparkles, Loader2 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ function TeamBadge({ abbr }: { abbr: string }) {
 
 // ── Hitters table ──────────────────────────────────────────────────────────────
 
-function HittersTable({ players }: { players: LeagueRosterPlayer[] }) {
+function HittersTable({ players, onSelect }: { players: LeagueRosterPlayer[]; onSelect: (p: LeagueRosterPlayer) => void }) {
   if (!players.length) return null;
   return (
     <div className="mb-6">
@@ -95,7 +95,11 @@ function HittersTable({ players }: { players: LeagueRosterPlayer[] }) {
             {players.map(p => {
               const s = p.stats?.type === "batting" ? p.stats : null;
               return (
-                <tr key={p.id} className="border-b border-gray-800/30 hover:bg-gray-800/20 transition-colors">
+                <tr
+                  key={p.id}
+                  onClick={() => onSelect(p)}
+                  className="border-b border-gray-800/30 hover:bg-gray-800/40 transition-colors cursor-pointer"
+                >
                   <td className="py-2 pr-3 font-medium whitespace-nowrap">{p.full_name}</td>
                   <td className="py-2 pr-3"><TeamBadge abbr={p.team_abbr} /></td>
                   <td className="py-2 pr-3">
@@ -128,7 +132,7 @@ function HittersTable({ players }: { players: LeagueRosterPlayer[] }) {
 
 // ── Pitchers table ─────────────────────────────────────────────────────────────
 
-function PitchersTable({ players }: { players: LeagueRosterPlayer[] }) {
+function PitchersTable({ players, onSelect }: { players: LeagueRosterPlayer[]; onSelect: (p: LeagueRosterPlayer) => void }) {
   if (!players.length) return null;
   return (
     <div>
@@ -158,7 +162,11 @@ function PitchersTable({ players }: { players: LeagueRosterPlayer[] }) {
             {players.map(p => {
               const s = p.stats?.type === "pitching" ? p.stats : null;
               return (
-                <tr key={p.id} className="border-b border-gray-800/30 hover:bg-gray-800/20 transition-colors">
+                <tr
+                  key={p.id}
+                  onClick={() => onSelect(p)}
+                  className="border-b border-gray-800/30 hover:bg-gray-800/40 transition-colors cursor-pointer"
+                >
                   <td className="py-2 pr-3 font-medium whitespace-nowrap">{p.full_name}</td>
                   <td className="py-2 pr-3"><TeamBadge abbr={p.team_abbr} /></td>
                   <td className="py-2 pr-3">
@@ -188,12 +196,148 @@ function PitchersTable({ players }: { players: LeagueRosterPlayer[] }) {
   );
 }
 
+// ── Player AI panel ──────────────────────────────────────────────────────────
+
+function BioSection({ label, text, accent }: { label: string; text: string; accent?: "green" | "red" }) {
+  if (!text) return null;
+  const border = accent === "green" ? "border-emerald-500/30" : accent === "red" ? "border-red-500/30" : "border-gray-800";
+  const labelColor = accent === "green" ? "text-emerald-400" : accent === "red" ? "text-red-400" : "text-gray-400";
+  return (
+    <div className={`border-l-2 ${border} pl-3 py-1`}>
+      <p className={`text-[10px] uppercase tracking-widest font-semibold mb-1 ${labelColor}`}>{label}</p>
+      <p className="text-sm text-gray-300 leading-relaxed">{text}</p>
+    </div>
+  );
+}
+
+function PlayerAiPanel({ player, onClose }: { player: LeagueRosterPlayer; onClose: () => void }) {
+  const { data: history } = useQuery({
+    queryKey: ["player-history", player.id],
+    queryFn: () => scoutingApi.playerHistory(player.id).then(r => r.data),
+  });
+
+  const { mutate: generateBio, data: bio, isPending, isError } = useMutation({
+    mutationFn: () => scoutingApi.aiBio(player.id).then(r => r.data),
+  });
+
+  const isPitcher = player.position === "SP" || player.position === "RP";
+  const seasons: PlayerHistoryResponse["db_history"] = history?.db_history?.length
+    ? history.db_history
+    : (history?.minor_league_history ?? []);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-start justify-between px-5 py-4 border-b border-gray-800 shrink-0">
+        <div>
+          <h2 className="text-lg font-bold">{player.full_name}</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {player.team_name} · {player.position} · {player.bats}/{player.throws}
+            {player.age && ` · Age ${player.age}`}
+          </p>
+        </div>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+        {/* Career stats table */}
+        {seasons.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-gray-500 font-semibold mb-2">Career</p>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-800">
+                  <th className="pb-1.5 pr-2 font-medium">Yr</th>
+                  <th className="pb-1.5 pr-2 font-medium">Lvl</th>
+                  {isPitcher ? (
+                    <>
+                      <th className="pb-1.5 pr-2 font-medium text-right">IP</th>
+                      <th className="pb-1.5 pr-2 font-medium text-right">ERA</th>
+                      <th className="pb-1.5 font-medium text-right">WHIP</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="pb-1.5 pr-2 font-medium text-right">AVG</th>
+                      <th className="pb-1.5 pr-2 font-medium text-right">HR</th>
+                      <th className="pb-1.5 font-medium text-right">wRC+</th>
+                    </>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {seasons.slice(0, 8).map((s, i) => (
+                  <tr key={i} className="border-b border-gray-800/30">
+                    <td className="py-1.5 pr-2 text-gray-300">{s.season ?? "—"}</td>
+                    <td className="py-1.5 pr-2 text-gray-500">{s.level}</td>
+                    {isPitcher ? (
+                      <>
+                        <td className="py-1.5 pr-2 text-right font-mono">{s.innings_pitched ?? "—"}</td>
+                        <td className="py-1.5 pr-2 text-right font-mono">{s.era ?? "—"}</td>
+                        <td className="py-1.5 text-right font-mono">{s.whip ?? "—"}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-1.5 pr-2 text-right font-mono">{s.avg ?? "—"}</td>
+                        <td className="py-1.5 pr-2 text-right">{s.home_runs ?? "—"}</td>
+                        <td className="py-1.5 text-right">{s.wrc_plus ?? "—"}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* AI analysis */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[10px] uppercase tracking-widest text-gray-500 font-semibold">AI Analysis</p>
+            {!bio && (
+              <button
+                onClick={() => generateBio()}
+                disabled={isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                {isPending ? "Analyzing…" : "Generate AI Analysis"}
+              </button>
+            )}
+          </div>
+
+          {isError && <p className="text-xs text-red-400">Failed to generate analysis. Try again.</p>}
+
+          {bio && (
+            <div className="space-y-4">
+              <BioSection label="Background" text={bio.background} />
+              <BioSection label="Career" text={bio.career} />
+              <BioSection label="Current Production" text={bio.current} />
+              <BioSection label="What Scouts Like" text={bio.likes} accent="green" />
+              <BioSection label="Concerns" text={bio.concerns} accent="red" />
+            </div>
+          )}
+
+          {!bio && !isPending && !isError && (
+            <p className="text-xs text-gray-600">
+              Generate a full AI breakdown of this player's background, career progression,
+              current production, strengths, and concerns — grounded in their real stat history.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function PlayersPage() {
   const [activeLevel, setActiveLevel] = useState<LevelTab>("26man");
   const [search, setSearch]           = useState("");
   const [position, setPosition]       = useState("");
+  const [team, setTeam]               = useState("");
+  const [selectedPlayer, setSelectedPlayer] = useState<LeagueRosterPlayer | null>(null);
   const qc = useQueryClient();
 
   const { data, isLoading, isError } = useQuery({
@@ -202,12 +346,19 @@ export default function PlayersPage() {
     staleTime: 3 * 60 * 1000,
   });
 
-  // Client-side filter for search + position (fast, no extra round-trip)
+  // Client-side filter for search + position + team (fast, no extra round-trip)
   const allPlayers = data?.players ?? [];
+
+  const teams = useMemo(() => {
+    const byAbbr = new Map<string, string>();
+    for (const p of allPlayers) byAbbr.set(p.team_abbr, p.team_name);
+    return Array.from(byAbbr.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [allPlayers]);
 
   const filtered = useMemo(() => {
     return allPlayers.filter(p => {
       if (position && p.position !== position) return false;
+      if (team && p.team_abbr !== team) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -218,12 +369,13 @@ export default function PlayersPage() {
       }
       return true;
     });
-  }, [allPlayers, search, position]);
+  }, [allPlayers, search, position, team]);
 
   const hitters  = filtered.filter(p => p.position !== "SP" && p.position !== "RP");
   const pitchers = filtered.filter(p => p.position === "SP" || p.position === "RP");
 
   const activeBorder = LEVEL_BORDER[activeLevel] ?? "border-b-blue-500";
+  const hasFilters = !!(search || position || team);
 
   return (
     <div className="max-w-screen-2xl mx-auto px-6 py-6">
@@ -249,7 +401,7 @@ export default function PlayersPage() {
           return (
             <button
               key={value}
-              onClick={() => { setActiveLevel(value); setSearch(""); setPosition(""); }}
+              onClick={() => { setActiveLevel(value); setSearch(""); setPosition(""); setTeam(""); setSelectedPlayer(null); }}
               className={`px-5 py-2.5 text-sm font-semibold whitespace-nowrap transition-colors relative flex-shrink-0
                 ${isActive ? "text-white" : "text-gray-500 hover:text-gray-300"}`}
             >
@@ -286,9 +438,17 @@ export default function PlayersPage() {
           <option value="">All positions</option>
           {POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
         </select>
-        {(search || position) && (
+        <select
+          className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500 text-gray-200"
+          value={team}
+          onChange={e => setTeam(e.target.value)}
+        >
+          <option value="">All teams</option>
+          {teams.map(([abbr, name]) => <option key={abbr} value={abbr}>{name}</option>)}
+        </select>
+        {hasFilters && (
           <button
-            onClick={() => { setSearch(""); setPosition(""); }}
+            onClick={() => { setSearch(""); setPosition(""); setTeam(""); }}
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 rounded-xl transition-colors"
           >
             <X className="h-3.5 w-3.5" />Clear
@@ -303,29 +463,39 @@ export default function PlayersPage() {
       </div>
 
       {/* Content */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-24 text-gray-500">
-          <div className="text-center">
-            <div className="h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-sm">Loading {LEVEL_TABS.find(t => t.value === activeLevel)?.label} rosters…</p>
-          </div>
-        </div>
-      ) : isError ? (
-        <div className="text-center py-20 text-red-400 text-sm">Failed to load roster data.</div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-20 text-gray-600">
-          <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No players found{search ? ` for "${search}"` : ""}.</p>
-        </div>
-      ) : (
-        <div className="stat-card">
-          <HittersTable players={hitters} />
-          {hitters.length > 0 && pitchers.length > 0 && (
-            <div className="border-t border-gray-800 my-5" />
+      <div className="flex gap-5 items-start">
+        <div className={selectedPlayer ? "flex-1 min-w-0" : "w-full"}>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-24 text-gray-500">
+              <div className="text-center">
+                <div className="h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-sm">Loading {LEVEL_TABS.find(t => t.value === activeLevel)?.label} rosters…</p>
+              </div>
+            </div>
+          ) : isError ? (
+            <div className="text-center py-20 text-red-400 text-sm">Failed to load roster data.</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-20 text-gray-600">
+              <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">No players found{search ? ` for "${search}"` : ""}.</p>
+            </div>
+          ) : (
+            <div className="stat-card">
+              <HittersTable players={hitters} onSelect={setSelectedPlayer} />
+              {hitters.length > 0 && pitchers.length > 0 && (
+                <div className="border-t border-gray-800 my-5" />
+              )}
+              <PitchersTable players={pitchers} onSelect={setSelectedPlayer} />
+            </div>
           )}
-          <PitchersTable players={pitchers} />
         </div>
-      )}
+
+        {selectedPlayer && (
+          <div className="w-[380px] shrink-0 border border-gray-800 rounded-xl bg-gray-900 sticky top-6 h-[calc(100vh-3rem)] overflow-hidden">
+            <PlayerAiPanel player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
