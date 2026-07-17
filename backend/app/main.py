@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from .api.routes import players, lineups, roster, scouting, analytics, teams, free_agency, standings, offseason, draft, draft_results, trades, sync
+from .api.routes import players, lineups, roster, scouting, analytics, teams, free_agency, standings, offseason, draft, draft_results, trades, sync, power_rankings
 from .models import spotrac_fa  # noqa — ensures table is registered with Base metadata
 from .models import draft_team_grade  # noqa — ensures table is registered with Base metadata
 
@@ -51,6 +51,7 @@ app.include_router(draft.router, prefix="/api/v1")
 app.include_router(draft_results.router, prefix="/api/v1")
 app.include_router(trades.router, prefix="/api/v1")
 app.include_router(sync.router)
+app.include_router(power_rankings.router)
 
 
 @app.get("/health")

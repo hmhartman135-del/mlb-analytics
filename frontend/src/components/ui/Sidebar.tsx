@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, ClipboardList, Users, Target, TrendingUp, User, UserCheck, BookOpen, Trophy, Briefcase, ArrowLeftRight } from "lucide-react";
+import { Activity, ClipboardList, Users, Target, TrendingUp, User, UserCheck, BookOpen, Trophy, Briefcase, ArrowLeftRight, Flame } from "lucide-react";
 import clsx from "clsx";
 
 const nav = [
@@ -16,6 +16,7 @@ const nav = [
   { href: "/standings", icon: Trophy, label: "Standings" },
   { href: "/offseason", icon: Briefcase, label: "Offseason" },
   { href: "/trades", icon: ArrowLeftRight, label: "Trades" },
+  { href: "/power-rankings", icon: Flame, label: "Power Rankings" },
 ];
 
 export function Sidebar() {

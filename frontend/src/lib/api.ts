@@ -1098,3 +1098,27 @@ export const syncApi = {
   status: () => api.get<SyncStatus>("/sync/status"),
   run:    () => api.post<{ queued: boolean; message: string }>("/sync/run"),
 };
+
+// --- Power Rankings ---
+
+export interface PowerRankingEntry {
+  rank: number;
+  team_name: string;
+  team_abbr: string | null;
+  division: string | null;
+  record: string | null;
+  blurb: string;
+}
+
+export interface PowerRankingsResponse {
+  season: number;
+  rankings: PowerRankingEntry[];
+  generated_at: string | null;
+}
+
+export const powerRankingsApi = {
+  get: (season: number) =>
+    api.get<PowerRankingsResponse>("/power-rankings", { params: { season } }),
+  generate: (season: number) =>
+    api.post<PowerRankingsResponse>("/power-rankings", null, { params: { season } }),
+};
