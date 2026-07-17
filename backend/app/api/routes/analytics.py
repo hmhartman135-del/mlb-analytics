@@ -118,14 +118,21 @@ async def team_analytics_overview(
     # Load team (for mlb_id)
     team_row = await db.execute(select(Team).where(Team.id == team_id))
     team = team_row.scalar_one_or_none()
+    is_mlb = bool(team and team.level == "MLB")
 
-    # Load 40-man roster
-    roster_result = await db.execute(
-        select(Player).where(
-            Player.team_id == team_id,
-            Player.roster_status.isnot(None),
+    # Load roster — MLB teams: 40-man only (roster_status set). Minor-league
+    # affiliates don't carry a roster_status at all, so just match team_id.
+    if is_mlb:
+        roster_result = await db.execute(
+            select(Player).where(
+                Player.team_id == team_id,
+                Player.roster_status.isnot(None),
+            )
         )
-    )
+    else:
+        roster_result = await db.execute(
+            select(Player).where(Player.team_id == team_id)
+        )
     roster = roster_result.scalars().all()
 
     hitters  = [p for p in roster if p.position not in ("SP", "RP")]
@@ -153,9 +160,10 @@ async def team_analytics_overview(
     )
     pit_by = {s.player_id: s for s in pit_rows.scalars().all()}
 
-    # Fetch platoon splits from MLB Stats API (one request for whole roster)
+    # Fetch platoon splits from MLB Stats API (one request for whole roster).
+    # Splits use rosterType=40Man, an MLB-only concept — skip for affiliates.
     splits_by_mlb: dict[int, dict] = {}
-    if team and team.mlb_id:
+    if is_mlb and team and team.mlb_id:
         splits_by_mlb = await _fetch_splits(team.mlb_id, season)
 
     # ── Hitter stats ──────────────────────────────────────────────────────────
@@ -316,6 +324,8 @@ async def team_analytics_overview(
 
     return {
         "season":           season,
+        "team_level":       team.level if team else None,
+        "team_name":        f"{team.city} {team.name}" if team else None,
         "team_war":         round(team_war, 1),
         "avg_wrc_plus":     round(avg_wrc_plus, 1),
         "team_fip":         round(team_fip, 2) if team_fip else None,

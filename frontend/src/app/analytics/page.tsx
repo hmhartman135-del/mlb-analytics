@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { analyticsApi } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { analyticsApi, teamsApi, type Team } from "@/lib/api";
 import { TeamSelector } from "@/components/ui/TeamSelector";
 import { SyncBar } from "@/components/ui/SyncBar";
 import { TrendingUp, RefreshCw } from "lucide-react";
@@ -62,14 +62,44 @@ function TabBar<T extends string>({
 
 /* ── Page ────────────────────────────────────────────────────────────────── */
 
-export default function AnalyticsPage() {
-  const [teamId, setTeamId]     = useState("");
-  const [teamName, setTeamName] = useState("");
-  const [season, setSeason]     = useState(2026);
+const MINOR_LEVELS = ["AAA", "AA", "A+", "A", "Rookie"] as const;
+type OrgLevel = "MLB" | (typeof MINOR_LEVELS)[number];
 
-  const { mutate, data, isPending } = useMutation({
-    mutationFn: () => analyticsApi.teamOverview(teamId, season).then(r => r.data),
+export default function AnalyticsPage() {
+  const [orgTeamId, setOrgTeamId]     = useState("");
+  const [orgTeamName, setOrgTeamName] = useState("");
+  const [level, setLevel]             = useState<OrgLevel>("MLB");
+  const [season, setSeason]           = useState(2026);
+
+  const { data: affiliateData } = useQuery({
+    queryKey: ["affiliates", orgTeamId],
+    queryFn: () => teamsApi.affiliates(orgTeamId).then(r => r.data),
+    enabled: !!orgTeamId,
   });
+  const affiliates = affiliateData?.affiliates ?? [];
+
+  // Whenever the org (or level) changes, reset back to the big-league club
+  // and clear any loaded stats so a stale team's data doesn't linger.
+  useEffect(() => {
+    setLevel("MLB");
+  }, [orgTeamId]);
+
+  const activeTeam: { id: string; label: string } | null =
+    level === "MLB"
+      ? (orgTeamId ? { id: orgTeamId, label: orgTeamName } : null)
+      : (() => {
+          const aff = affiliates.find(a => a.level === level);
+          return aff ? { id: aff.id, label: `${aff.full_name} (${level})` } : null;
+        })();
+
+  const { mutate, data, isPending, reset } = useMutation({
+    mutationFn: () => analyticsApi.teamOverview(activeTeam!.id, season).then(r => r.data),
+  });
+
+  const handleLevelChange = (lvl: OrgLevel) => {
+    setLevel(lvl);
+    reset();
+  };
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -82,32 +112,58 @@ export default function AnalyticsPage() {
 
       <div className="stat-card mb-6 flex flex-wrap gap-4 items-end">
         <div className="flex-1 min-w-48">
-          <label className="block text-xs text-gray-400 mb-1">Team</label>
-          <TeamSelector value={teamId} onChange={(id, t) => { setTeamId(id); setTeamName(t.full_name); }} />
+          <label className="block text-xs text-gray-400 mb-1">Organization</label>
+          <TeamSelector value={orgTeamId} onChange={(id, t) => { setOrgTeamId(id); setOrgTeamName(t.full_name); reset(); }} />
         </div>
         <div>
           <label className="block text-xs text-gray-400 mb-1">Season</label>
           <input type="number" className="w-32 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
             value={season} min={2020} max={2026} onChange={e => setSeason(Number(e.target.value))} />
         </div>
-        <button onClick={() => mutate()} disabled={!teamId || isPending}
+        <button onClick={() => mutate()} disabled={!activeTeam || isPending}
           className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors">
           {isPending && <RefreshCw className="h-4 w-4 animate-spin" />}
-          {teamId ? `Load ${teamName}` : "Select a team first"}
+          {activeTeam ? `Load ${activeTeam.label}` : "Select a team first"}
         </button>
       </div>
+
+      {orgTeamId && (
+        <div className="mb-6 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500 mr-1">Level:</span>
+          <TabBar
+            tabs={[
+              { id: "MLB" as OrgLevel, label: "Majors" },
+              ...MINOR_LEVELS
+                .filter(lvl => affiliates.some(a => a.level === lvl))
+                .map(lvl => ({ id: lvl as OrgLevel, label: lvl })),
+            ]}
+            active={level}
+            onChange={handleLevelChange}
+          />
+        </div>
+      )}
 
       {data && (
         <div className="space-y-8">
           {/* Team summary */}
-          <div className="grid grid-cols-3 gap-4">
-            <StatBox label="Team WAR"  value={data.team_war}        color="text-blue-400" />
-            <StatBox label="Avg wRC+"  value={data.avg_wrc_plus}    color="text-emerald-400" />
-            <StatBox label="Team FIP"  value={data.team_fip ?? "—"} color="text-amber-400" />
+          <div>
+            <p className="text-sm text-gray-400 mb-3">
+              {data.team_name} {data.team_level && data.team_level !== "MLB" && (
+                <span className="text-amber-400 font-medium">({data.team_level})</span>
+              )} · {data.season} season
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <StatBox label="Team WAR"  value={data.team_war}        color="text-blue-400" />
+              <StatBox label="Avg wRC+"  value={data.avg_wrc_plus}    color="text-emerald-400" />
+              <StatBox label="Team FIP"  value={data.team_fip ?? "—"} color="text-amber-400" />
+            </div>
           </div>
 
           {data.hitting_leaderboard?.length  > 0 && <OffenseSection  players={data.hitting_leaderboard} />}
           {data.pitching_leaderboard?.length > 0 && <PitchingSection pitchers={data.pitching_leaderboard} />}
+          {data.hitting_leaderboard?.length === 0 && data.pitching_leaderboard?.length === 0 && (
+            <p className="text-sm text-gray-500 text-center py-8">No stats found for this team/season.</p>
+          )}
         </div>
       )}
     </div>

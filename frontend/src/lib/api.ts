@@ -243,6 +243,9 @@ export interface FinancesData {
 export const teamsApi = {
   list: (level = "MLB") =>
     api.get<{ teams: Team[] }>("/teams/", { params: { level } }),
+
+  affiliates: (teamId: string) =>
+    api.get<{ parent_team: Team; affiliates: Team[] }>(`/teams/${teamId}/affiliates`),
 };
 
 // --- Player API ---
