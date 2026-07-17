@@ -1213,3 +1213,112 @@ export const scheduleApi = {
   boxscore: (gamePk: number) =>
     api.get<BoxScoreResponse>(`/schedule/game/${gamePk}/boxscore`),
 };
+
+// --- Playoffs ---
+
+export interface PlayoffTeamSeed {
+  id: string;
+  full_name: string;
+  alias: string;
+  win: number;
+  loss: number;
+  pct: number;
+  games_back: number | null;
+  streak_kind: string;
+  streak_length: number;
+  last10_win: number;
+  last10_loss: number;
+  division: string;
+  seed: number;
+  is_wild_card: boolean;
+}
+
+export interface PlayoffBubbleTeam {
+  id: string;
+  full_name: string;
+  alias: string;
+  win: number;
+  loss: number;
+  pct: number;
+  games_back: number | null;
+  division: string;
+}
+
+export interface PlayoffLeagueField {
+  league: string;
+  league_name: string;
+  seeds: PlayoffTeamSeed[];
+  bubble: PlayoffBubbleTeam[];
+}
+
+export interface PlayoffOutlook {
+  summary: string;
+  generated_at: string;
+}
+
+export interface PlayoffFieldResponse {
+  season: number;
+  leagues: PlayoffLeagueField[];
+  outlook: PlayoffOutlook | null;
+}
+
+export interface SeriesPrediction {
+  predicted_winner: string;
+  confidence: string;
+  reasoning: string;
+  generated_at: string;
+}
+
+export interface BracketGame {
+  game_pk: number;
+  game_date: string;
+  status: string;
+  away_team: string;
+  away_abbr: string;
+  away_score: number | null;
+  home_team: string;
+  home_abbr: string;
+  home_score: number | null;
+}
+
+export interface BracketSeries {
+  series_key: string;
+  game_type: string;
+  round_label: string;
+  games_in_series: number | null;
+  team_a: string;
+  team_a_abbr: string;
+  team_a_id: number;
+  team_b: string;
+  team_b_abbr: string;
+  team_b_id: number;
+  started: boolean;
+  is_over: boolean;
+  result_text: string | null;
+  winner: string | null;
+  games: BracketGame[];
+  prediction: SeriesPrediction | null;
+}
+
+export interface BracketRound {
+  round_label: string;
+  game_type: string;
+  series: BracketSeries[];
+}
+
+export interface BracketResponse {
+  season: number;
+  has_bracket: boolean;
+  rounds: BracketRound[];
+}
+
+export const playoffsApi = {
+  getField: (season: number) =>
+    api.get<PlayoffFieldResponse>("/playoffs/field", { params: { season } }),
+  generateOutlook: (season: number) =>
+    api.post<PlayoffOutlook>("/playoffs/field/outlook", null, { params: { season } }),
+  getBracket: (season: number) =>
+    api.get<BracketResponse>("/playoffs/bracket", { params: { season } }),
+  predictSeries: (seriesKey: string, season: number) =>
+    api.post<SeriesPrediction>(`/playoffs/bracket/series/${seriesKey}/predict`, null, { params: { season } }),
+};

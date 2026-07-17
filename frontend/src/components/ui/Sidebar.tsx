@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, ClipboardList, Users, Target, TrendingUp, User, UserCheck, BookOpen, Trophy, Briefcase, ArrowLeftRight, Flame, CalendarDays } from "lucide-react";
+import { Activity, ClipboardList, Users, Target, TrendingUp, User, UserCheck, BookOpen, Trophy, Briefcase, ArrowLeftRight, Flame, CalendarDays, Award } from "lucide-react";
 import clsx from "clsx";
 
 const nav = [
@@ -15,6 +15,7 @@ const nav = [
   { href: "/free-agency", icon: UserCheck, label: "Free Agency" },
   { href: "/draft", icon: BookOpen, label: "Draft" },
   { href: "/standings", icon: Trophy, label: "Standings" },
+  { href: "/playoffs", icon: Award, label: "Playoffs" },
   { href: "/offseason", icon: Briefcase, label: "Offseason" },
   { href: "/trades", icon: ArrowLeftRight, label: "Trades" },
   { href: "/power-rankings", icon: Flame, label: "Power Rankings" },
