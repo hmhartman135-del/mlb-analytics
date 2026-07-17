@@ -11,6 +11,7 @@ import {
   type OffseasonFATarget,
   type OffseasonContextResponse,
   type SigningGradeResponse,
+  type ContractStatus,
 } from "@/lib/api";
 import {
   Briefcase,
@@ -25,6 +26,9 @@ import {
   PenLine,
   X,
   ChevronRight,
+  Users,
+  Scale,
+  Award,
 } from "lucide-react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -104,6 +108,17 @@ function YrsBadge({ years }: { years: number | null }) {
   if (years === 1) return <span className="text-amber-400 text-xs font-medium">{years}yr</span>;
   if (years <= 3) return <span className="text-yellow-300/80 text-xs font-medium">{years}yr</span>;
   return <span className="text-gray-300 text-xs">{years}yr</span>;
+}
+
+function StatusBadge({ status }: { status: ContractStatus }) {
+  const cfg: Record<ContractStatus, { label: string; cls: string }> = {
+    signed:      { label: "Signed",      cls: "bg-blue-500/20 text-blue-300 border-blue-500/30" },
+    arbitration: { label: "Arb",         cls: "bg-amber-500/20 text-amber-300 border-amber-500/30" },
+    pre_arb:     { label: "Pre-Arb",     cls: "bg-gray-600/30 text-gray-300 border-gray-500/30" },
+    free_agent:  { label: "Hits FA",     cls: "bg-red-500/20 text-red-400 border-red-500/30" },
+  };
+  const c = cfg[status];
+  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${c.cls}`}>{c.label}</span>;
 }
 
 function StatCard({ label, value, sub, color = "text-gray-100" }: {
@@ -203,11 +218,163 @@ interface Signing {
   expanded: boolean;
 }
 
+interface Release {
+  id: string;
+  player_name: string;
+  position: string | null;
+  age: number | null;
+  salary_saved_m: number;
+  grade: string;
+  headline: string;
+  analysis: string;
+  expanded: boolean;
+}
+
 function GradeBadge({ grade }: { grade: string }) {
   return (
     <span className={`inline-flex items-center justify-center w-9 h-9 rounded-xl text-sm font-bold border ${gradeBg(grade)}`}>
       {grade}
     </span>
+  );
+}
+
+// ── Roster panel — who's on the team, their contracts, arb estimates,
+//    and a "what if I move him" mini release/trade evaluator ───────────────
+
+function RosterRow({
+  player, budgetRemainingM, teamName, onGraded, moved,
+}: {
+  player: OffseasonPlayer;
+  budgetRemainingM: number;
+  teamName: string;
+  onGraded: (release: Release) => void;
+  moved: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: () => offseasonApi.gradeRelease({
+      team_name: teamName,
+      player_name: player.name,
+      position: player.position,
+      age: player.age,
+      salary_m: player.salary_m,
+      war: player.war,
+      service_time: player.service_time,
+      status: player.status,
+      est_arb_salary_m: player.est_arb_salary_m,
+      budget_remaining_m: budgetRemainingM,
+    }),
+    onSuccess: (res) => {
+      onGraded({
+        id: player.player_id,
+        player_name: player.name,
+        position: player.position,
+        age: player.age,
+        salary_saved_m: player.projected_2027_m,
+        grade: res.data.grade,
+        headline: res.data.headline,
+        analysis: res.data.analysis,
+        expanded: false,
+      });
+      setExpanded(false);
+    },
+  });
+
+  return (
+    <>
+      <tr className={`hover:bg-gray-800/30 transition-colors ${moved ? "opacity-40" : ""}`}>
+        <td className="py-2 pr-3"><span className="text-gray-200 font-medium">{player.name}</span></td>
+        <td className="py-2 text-center"><PosBadge pos={player.position} /></td>
+        <td className="py-2 text-center text-gray-400">{player.age ?? "—"}</td>
+        <td className="py-2 text-right text-gray-300 font-mono text-xs">{player.salary_m > 0 ? fmtM(player.salary_m) : "—"}</td>
+        <td className="py-2 text-center"><StatusBadge status={player.status} /></td>
+        <td className="py-2 text-right font-mono text-xs text-amber-300">
+          {player.est_arb_salary_m != null ? `~${fmtM(player.est_arb_salary_m)}` : "—"}
+        </td>
+        <td className={`py-2 text-center font-medium text-xs ${warColor(player.war)}`}>{player.war >= 0 ? "+" : ""}{player.war.toFixed(1)}</td>
+        <td className="py-2 text-right">
+          {moved ? (
+            <span className="text-[10px] text-gray-600 italic">Moved</span>
+          ) : (
+            <button
+              onClick={() => setExpanded(e => !e)}
+              className="flex items-center gap-1 px-2 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-[11px] text-gray-300 font-medium transition-colors ml-auto"
+            >
+              <Scale className="h-3 w-3" />Move him?
+            </button>
+          )}
+        </td>
+      </tr>
+      {expanded && !moved && (
+        <tr>
+          <td colSpan={8} className="px-3 pb-3 pt-1 bg-gray-950/40">
+            <div className="px-4 py-3 bg-blue-950/20 border border-blue-800/30 rounded-xl space-y-2">
+              <p className="text-xs text-gray-300">
+                Evaluate releasing or trading away <span className="font-semibold text-gray-100">{player.name}</span> —
+                frees up an estimated {fmtM(player.projected_2027_m)} in projected 2027 payroll.
+              </p>
+              <button
+                onClick={() => mutation.mutate()}
+                disabled={mutation.isPending}
+                className="flex items-center justify-center gap-2 w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition-colors"
+              >
+                {mutation.isPending
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Grading move…</>
+                  : <><Scale className="h-3.5 w-3.5" />Grade This Move</>}
+              </button>
+              {mutation.isError && <p className="text-[11px] text-red-400">Failed to grade. Try again.</p>}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function RosterPanel({
+  roster, budgetRemainingM, teamName, movedIds, onGraded,
+}: {
+  roster: OffseasonPlayer[];
+  budgetRemainingM: number;
+  teamName: string;
+  movedIds: Set<string>;
+  onGraded: (release: Release) => void;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[11px] text-gray-500 uppercase tracking-wider border-b border-gray-700">
+            <th className="text-left pb-2 font-medium">Player</th>
+            <th className="text-center pb-2 font-medium w-10">Pos</th>
+            <th className="text-center pb-2 font-medium w-10">Age</th>
+            <th className="text-right pb-2 font-medium w-20">Salary</th>
+            <th className="text-center pb-2 font-medium w-20">Status</th>
+            <th className="text-right pb-2 font-medium w-24">Est. Arb</th>
+            <th className="text-center pb-2 font-medium w-16">WAR</th>
+            <th className="text-right pb-2 font-medium w-28"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {roster.map(p => (
+            <RosterRow
+              key={p.player_id}
+              player={p}
+              budgetRemainingM={budgetRemainingM}
+              teamName={teamName}
+              onGraded={onGraded}
+              moved={movedIds.has(p.player_id)}
+            />
+          ))}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-gray-600 italic mt-3">
+        Est. Arb is a rough model (service time + WAR), not an official projection — real arbitration
+        outcomes depend on comps and negotiation. Pre-arb/free-agent status ignores Super Two eligibility,
+        which needs data we don't have.
+      </p>
+    </div>
   );
 }
 
@@ -217,16 +384,20 @@ function FASimulatorPanel({ teams }: { teams: Team[] }) {
   const [posFilter, setPosFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const [signings, setSignings] = useState<Signing[]>([]);
+  const [releases, setReleases] = useState<Release[]>([]);
   const [signingPlayer, setSigningPlayer] = useState<OffseasonFATarget | null>(null);
   const [contractYears, setContractYears] = useState(2);
   const [contractAav, setContractAav] = useState("");
   const [gradingId, setGradingId] = useState<string | null>(null);
+  const [offseasonGrade, setOffseasonGrade] = useState<SigningGradeResponse | null>(null);
 
   const contextMutation = useMutation({
     mutationFn: (teamId: string) => offseasonApi.getContext(teamId),
     onSuccess: (res) => {
       setContext(res.data);
       setSignings([]);
+      setReleases([]);
+      setOffseasonGrade(null);
     },
   });
 
@@ -235,14 +406,50 @@ function FASimulatorPanel({ teams }: { teams: Team[] }) {
       offseasonApi.gradeMove(payload),
   });
 
+  const offseasonGradeMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof offseasonApi.gradeOffseason>[0]) =>
+      offseasonApi.gradeOffseason(payload),
+    onSuccess: (res) => setOffseasonGrade(res.data),
+  });
+
   const signedIds = useMemo(() => new Set(signings.map(s => s.id)), [signings]);
+  const movedIds  = useMemo(() => new Set(releases.map(r => r.id)), [releases]);
 
   const committedM = useMemo(
-    () => signings.reduce((sum, s) => sum + s.contract_aav_m, 0),
-    [signings],
+    () => signings.reduce((sum, s) => sum + s.contract_aav_m, 0)
+        - releases.reduce((sum, r) => sum + r.salary_saved_m, 0),
+    [signings, releases],
   );
 
   const budgetRemainingM = (context?.context.estimated_budget_m ?? 0) - committedM;
+  const totalMoves = signings.length + releases.length;
+
+  const handleGradeOffseason = () => {
+    if (!context || totalMoves === 0) return;
+    setOffseasonGrade(null);
+    offseasonGradeMutation.mutate({
+      team_name: context.team.full_name,
+      starting_budget_m: context.context.estimated_budget_m,
+      final_budget_remaining_m: budgetRemainingM,
+      moves: [
+        ...signings.map(s => ({
+          type: "sign" as const,
+          player_name: s.player_name,
+          position: s.position,
+          years: s.contract_years,
+          aav_m: s.contract_aav_m,
+          grade: s.grade,
+        })),
+        ...releases.map(r => ({
+          type: "release" as const,
+          player_name: r.player_name,
+          position: r.position,
+          salary_saved_m: r.salary_saved_m,
+          grade: r.grade,
+        })),
+      ],
+    });
+  };
 
   const rosterNeeds = useMemo(() => {
     const ALL_POS = ["SP", "SP", "SP", "SP", "SP", "RP", "RP", "RP", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
@@ -375,9 +582,25 @@ function FASimulatorPanel({ teams }: { teams: Team[] }) {
           {/* Budget bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <StatCard label="Estimated Budget" value={fmtM(context.context.estimated_budget_m)} sub={`vs $${context.context.cbt_threshold_m.toFixed(0)}M CBT`} color="text-green-400" />
-            <StatCard label="Committed This OS" value={fmtM(committedM)} sub={`${signings.length} signing${signings.length !== 1 ? "s" : ""}`} color={committedM > context.context.estimated_budget_m ? "text-red-400" : "text-gray-100"} />
+            <StatCard label="Net Committed This OS" value={fmtM(committedM)} sub={`${signings.length} signing${signings.length !== 1 ? "s" : ""} · ${releases.length} move${releases.length !== 1 ? "s" : ""}`} color={committedM > context.context.estimated_budget_m ? "text-red-400" : "text-gray-100"} />
             <StatCard label="Remaining Budget" value={fmtM(Math.max(0, budgetRemainingM))} sub={budgetRemainingM < 0 ? "OVER BUDGET" : "available"} color={budgetRemainingM < 0 ? "text-red-400" : "text-green-400"} />
-            <StatCard label="Expiring Contracts" value={String(context.context.expiring_count)} sub="players entering FA" color={context.context.expiring_count >= 5 ? "text-amber-400" : "text-gray-100"} />
+            <StatCard label="Hitting Free Agency" value={String(context.context.expiring_count)} sub="of 2027 season" color={context.context.expiring_count >= 5 ? "text-amber-400" : "text-gray-100"} />
+          </div>
+
+          {/* My Roster — contracts, status, arbitration estimates */}
+          <div className="bg-gray-900 border border-gray-700/60 rounded-2xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Users className="h-4 w-4 text-blue-400" />
+              <h3 className="text-sm font-semibold text-gray-200">My Roster</h3>
+              <span className="ml-auto text-xs text-gray-500">{context.roster.length} players · {context.arbitration_eligible.length} arb-eligible</span>
+            </div>
+            <RosterPanel
+              roster={context.roster}
+              budgetRemainingM={budgetRemainingM}
+              teamName={context.team.full_name}
+              movedIds={movedIds}
+              onGraded={(release) => setReleases(prev => [release, ...prev])}
+            />
           </div>
 
           {/* Expiring players + FA pool + Signings log */}
@@ -535,15 +758,81 @@ function FASimulatorPanel({ teams }: { teams: Team[] }) {
             </div>
           </div>
 
-          {/* Expiring contracts reference */}
-          <div className="bg-gray-900 border border-gray-700/60 rounded-2xl p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <UserMinus className="h-4 w-4 text-red-400" />
-              <h3 className="text-sm font-semibold text-gray-200">Expiring After 2026</h3>
-              <span className="ml-auto text-xs text-gray-500">{context.expiring_contracts.length} player{context.expiring_contracts.length !== 1 ? "s" : ""}</span>
+          {/* Roster moves (releases/trades) log */}
+          {releases.length > 0 && (
+            <div className="bg-gray-900 border border-gray-700/60 rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <UserMinus className="h-4 w-4 text-red-400" />
+                <h3 className="text-sm font-semibold text-gray-200">Roster Moves</h3>
+                <span className="ml-auto text-xs text-gray-500">{releases.length} move{releases.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="divide-y divide-gray-800/60">
+                {releases.map(r => (
+                  <div key={r.id} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex items-start gap-3">
+                      <GradeBadge grade={r.grade} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-sm font-semibold text-gray-100 truncate">{r.player_name}</span>
+                          <PosBadge pos={r.position} />
+                          <span className="text-[10px] text-gray-500">frees ~{fmtM(r.salary_saved_m)}</span>
+                        </div>
+                        <p className={`text-xs font-medium italic ${gradeColor(r.grade)}`}>{r.headline}</p>
+                        <p className="text-xs text-gray-400 mt-2 leading-relaxed">{r.analysis}</p>
+                      </div>
+                      <button onClick={() => setReleases(prev => prev.filter(x => x.id !== r.id))} className="text-gray-700 hover:text-red-400 transition-colors flex-shrink-0">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <ExpiringTable players={context.expiring_contracts} />
-          </div>
+          )}
+
+          {/* Grade the whole offseason */}
+          {totalMoves > 0 && (
+            <div className="bg-gray-900 border border-gray-700/60 rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Award className="h-4 w-4 text-amber-400" />
+                <h3 className="text-sm font-semibold text-gray-200">Final Offseason Grade</h3>
+                <span className="ml-auto text-xs text-gray-500">{totalMoves} total move{totalMoves !== 1 ? "s" : ""}</span>
+              </div>
+
+              {!offseasonGrade && (
+                <button
+                  onClick={handleGradeOffseason}
+                  disabled={offseasonGradeMutation.isPending}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+                >
+                  {offseasonGradeMutation.isPending
+                    ? <><Loader2 className="h-4 w-4 animate-spin" />Grading the whole offseason…</>
+                    : <><Award className="h-4 w-4" />Grade My Offseason</>}
+                </button>
+              )}
+              {offseasonGradeMutation.isError && (
+                <p className="text-xs text-red-400 mt-2">Failed to grade. Try again.</p>
+              )}
+              {offseasonGrade && (
+                <div className="flex items-start gap-4">
+                  <span className={`inline-flex items-center justify-center w-14 h-14 rounded-2xl text-xl font-bold border flex-shrink-0 ${gradeBg(offseasonGrade.grade)}`}>
+                    {offseasonGrade.grade}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold mb-1 ${gradeColor(offseasonGrade.grade)}`}>{offseasonGrade.headline}</p>
+                    <p className="text-sm text-gray-300 leading-relaxed">{offseasonGrade.analysis}</p>
+                    <button
+                      onClick={handleGradeOffseason}
+                      disabled={offseasonGradeMutation.isPending}
+                      className="mt-3 text-xs text-gray-500 hover:text-gray-300 transition-colors underline underline-offset-2"
+                    >
+                      Re-grade with latest moves
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

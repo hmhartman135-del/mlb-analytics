@@ -65,6 +65,62 @@ def _war_pit(s: PitchingStats | None) -> float:
     return 0.0
 
 
+# ── Contract status / arbitration (real MLB team-control rules) ──────────────
+# 0-3 yrs service: pre-arb, team-controlled at ~league minimum.
+# 3-6 yrs (ignoring Super Two, which needs data we don't have): arbitration —
+#   still team-controlled, salary reset each year via the arb process/negotiation.
+# 6+ yrs with no guaranteed years left: hits the open market this offseason.
+# Any player with >=1 guaranteed year left on a multi-year deal is "signed"
+# regardless of service time.
+
+def _contract_status(contract_years: int | None, service_time: float | None) -> str:
+    if contract_years and contract_years >= 1:
+        return "signed"
+    svc = service_time or 0.0
+    if svc >= 6.0:
+        return "free_agent"
+    if svc >= 3.0:
+        return "arbitration"
+    return "pre_arb"
+
+
+def _estimate_arb_salary(
+    service_time: float | None, war: float, current_salary_m: float | None, position: str | None = None,
+) -> float | None:
+    """Rough arbitration-salary estimate — NOT an official projection. Uses the
+    common sabermetric approximation: market value per win scaled by the
+    player's arb year (1st through 4th+), floored at league minimum and at
+    their current salary (arb salaries essentially never go down).
+    WAR is capped before use — the shared WAR helpers extrapolate short-relief
+    sample sizes up to a full-season target innings count, which can inflate a
+    reliever's WAR well past anything realistic (e.g. 40 IP of good work
+    scaled up to 8+ WAR); 6.0 covers even an MVP-caliber year without those
+    small-sample artifacts blowing up the estimate. Relievers get a lower
+    $/win rate — real arbitration panels weight saves/ERA far more than WAR
+    for bullpen arms, so a flat position-player rate badly overpays them here."""
+    svc = service_time or 0.0
+    if svc < 3.0:
+        return None
+    capped_war = min(max(war, 0.0), 6.0)
+    per_win_m = 4.0 if position == "RP" else 8.0
+    market_value_m = capped_war * per_win_m
+    if svc < 4.0:
+        pct = 0.45
+    elif svc < 5.0:
+        pct = 0.65
+    elif svc < 6.0:
+        pct = 0.85
+    else:
+        pct = 1.0
+    est = max(market_value_m * pct, 0.76)
+    if current_salary_m:
+        est = max(est, current_salary_m)
+    # Real arbitration awards/settlements essentially never exceed the mid-$20Ms
+    # even for the game's best players in their final arb year.
+    est = min(est, 26.0)
+    return round(est, 1)
+
+
 # ── Request / Response models ────────────────────────────────────────────────
 
 class OffseasonPlanRequest(BaseModel):
@@ -82,6 +138,26 @@ class GradeMoveRequest(BaseModel):
     contract_aav_m: float
     budget_remaining_m: float
     existing_signings: list[dict] = []   # [{player_name, position, years, aav_m, grade}]
+
+
+class GradeReleaseRequest(BaseModel):
+    team_name: str
+    player_name: str
+    position: str | None = None
+    age: int | None = None
+    salary_m: float
+    war: float
+    service_time: float | None = None
+    status: str    # "signed" | "arbitration" | "pre_arb" | "free_agent"
+    est_arb_salary_m: float | None = None
+    budget_remaining_m: float
+
+
+class GradeOffseasonRequest(BaseModel):
+    team_name: str
+    starting_budget_m: float
+    final_budget_remaining_m: float
+    moves: list[dict]   # [{type: "sign"|"release", player_name, position, years?, aav_m?, salary_saved_m?, grade}]
 
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
@@ -220,23 +296,40 @@ async def _fetch_context(team_id: UUID, db: AsyncSession) -> dict:
     def _player_dict(p: Player) -> dict:
         is_pitcher = p.position in ("SP", "RP")
         war = _war_pit(pit_by.get(p.id)) if is_pitcher else _war_bat(bat_by.get(p.id))
+        salary_m = round(p.salary or 0.0, 2)
+        status = _contract_status(p.contract_years, p.service_time)
+        est_arb_salary_m = _estimate_arb_salary(p.service_time, war, salary_m, p.position) if status == "arbitration" else None
+        # Best-available estimate of what this player costs the 2027 payroll:
+        # guaranteed salary if signed, projected arb salary if arb-eligible,
+        # current (near-minimum) salary as a proxy if pre-arb.
+        projected_2027_m = est_arb_salary_m if est_arb_salary_m is not None else salary_m
         return {
             "player_id": str(p.id),
             "name": p.full_name,
             "position": p.position,
             "age": p.age,
-            "salary_m": round(p.salary or 0.0, 2),
+            "salary_m": salary_m,
             "contract_years": p.contract_years,
             "years_remaining": p.contract_years or 0,
+            "service_time": p.service_time,
             "war": war,
+            "status": status,               # "signed" | "arbitration" | "pre_arb" | "free_agent"
+            "est_arb_salary_m": est_arb_salary_m,
+            "projected_2027_m": projected_2027_m,
         }
 
     all_players = [_player_dict(p) for p in roster]
-    expiring  = [p for p in all_players if p["contract_years"] is not None and p["contract_years"] == 0]
-    returning = [p for p in all_players if p["contract_years"] and p["contract_years"] >= 1]
+    # "Expiring" = actually hits the open market this offseason (real free agency).
+    # Arbitration/pre-arb players remain team-controlled — they used to be
+    # miscounted as "expiring" whenever contract_years was 0, and players with
+    # contract_years=None (common — it's only populated for guaranteed multi-year
+    # deals) were silently dropped from both buckets. Every roster player now
+    # lands in exactly one status.
+    expiring  = [p for p in all_players if p["status"] == "free_agent"]
+    returning = [p for p in all_players if p["status"] != "free_agent"]
 
     payroll_2026_m   = round(sum(p["salary_m"] for p in all_players), 1)
-    committed_2027_m = round(sum(p["salary_m"] for p in returning), 1)
+    committed_2027_m = round(sum(p["projected_2027_m"] for p in returning), 1)
     available_m      = round(max(0.0, CBT_2027_M - committed_2027_m), 1)
 
     fa_res = await db.execute(
@@ -253,6 +346,7 @@ async def _fetch_context(team_id: UUID, db: AsyncSession) -> dict:
 
     return dict(
         team=team,
+        all_players=all_players,
         expiring=expiring,
         returning=returning,
         payroll_2026_m=payroll_2026_m,
@@ -293,6 +387,11 @@ async def get_offseason_context(
         },
         "expiring_contracts":  sorted(ctx["expiring"],  key=lambda x: -x["salary_m"]),
         "returning_contracts": sorted(ctx["returning"], key=lambda x: -x["salary_m"]),
+        "roster": sorted(ctx["all_players"], key=lambda x: (_pos_key(x), -x["salary_m"])),
+        "arbitration_eligible": sorted(
+            [p for p in ctx["all_players"] if p["status"] == "arbitration"],
+            key=lambda x: -(x["est_arb_salary_m"] or 0),
+        ),
         "fa_pool": [
             {
                 "id":          str(fa.id),
@@ -346,27 +445,116 @@ GRADE: [A+/A/A-/B+/B/B-/C+/C/C-/D/F]
 HEADLINE: [one sharp sentence, max 12 words]
 ANALYSIS: [2–3 sentences on fit, value, and risk]"""
 
+    raw = await _ask_claude_for_grade(prompt)
+    return _parse_grade_response(raw)
+
+
+def _parse_grade_response(raw: str) -> dict:
+    grade    = re.search(r"^GRADE:\s*(.+)$",    raw, re.MULTILINE)
+    headline = re.search(r"^HEADLINE:\s*(.+)$", raw, re.MULTILINE)
+    analysis = re.search(r"^ANALYSIS:\s*(.+)$", raw, re.MULTILINE | re.DOTALL)
+    return {
+        "grade":    (grade.group(1).strip()    if grade    else "B"),
+        "headline": (headline.group(1).strip() if headline else "Move evaluated."),
+        "analysis": (analysis.group(1).strip() if analysis else raw),
+    }
+
+
+async def _ask_claude_for_grade(prompt: str, max_tokens: int = 300) -> str:
+    settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
         model="claude-opus-4-7",
-        max_tokens=300,
+        max_tokens=max_tokens,
         system=(
             "You are a sharp MLB analyst. Be direct and specific. "
             "Always use EXACTLY the format requested."
         ),
         messages=[{"role": "user", "content": prompt}],
     )
-    raw = message.content[0].text.strip()
+    return message.content[0].text.strip()
 
-    grade    = re.search(r"^GRADE:\s*(.+)$",    raw, re.MULTILINE)
-    headline = re.search(r"^HEADLINE:\s*(.+)$", raw, re.MULTILINE)
-    analysis = re.search(r"^ANALYSIS:\s*(.+)$", raw, re.MULTILINE | re.DOTALL)
 
-    return {
-        "grade":    (grade.group(1).strip()    if grade    else "B"),
-        "headline": (headline.group(1).strip() if headline else "Move evaluated."),
-        "analysis": (analysis.group(1).strip() if analysis else raw),
-    }
+_STATUS_LABEL = {
+    "signed": "under a guaranteed multi-year contract",
+    "arbitration": "arbitration-eligible (team-controlled, salary reset via arb)",
+    "pre_arb": "pre-arbitration (team-controlled, near league minimum)",
+    "free_agent": "hitting free agency this offseason",
+}
+
+
+@router.post("/grade-release")
+async def grade_release(req: GradeReleaseRequest):
+    """Grade the impact of releasing/trading away a player already on the roster —
+    the 'what happens if I get rid of this guy' move."""
+    status_desc = _STATUS_LABEL.get(req.status, req.status)
+    arb_note = f" (projected arb salary if kept: ${req.est_arb_salary_m:.1f}M)" if req.est_arb_salary_m else ""
+
+    prompt = f"""You are an MLB GM evaluating whether to release or trade away a player already on the roster.
+
+TEAM: {req.team_name}
+BUDGET REMAINING THIS OFFSEASON: ${req.budget_remaining_m:.1f}M
+
+PLAYER TO MOVE:
+Name: {req.player_name}
+Position: {req.position or 'Unknown'}
+Age: {req.age or 'Unknown'}
+Contract status: {status_desc}{arb_note}
+Current salary: ${req.salary_m:.1f}M
+2026 WAR: {req.war:+.1f}
+
+Grade the decision to move on from this player (release, non-tender, or trade away — assume the team
+gets no meaningful return, just salary relief). Weigh the WAR lost against the payroll flexibility gained,
+and whether their salary/status makes them a real trade chip vs. a pure cut. Respond with EXACTLY this
+format and nothing else:
+GRADE: [A+/A/A-/B+/B/B-/C+/C/C-/D/F]
+HEADLINE: [one sharp sentence, max 12 words]
+ANALYSIS: [2–3 sentences on what's gained and lost]"""
+
+    raw = await _ask_claude_for_grade(prompt)
+    return _parse_grade_response(raw)
+
+
+@router.post("/grade-offseason")
+async def grade_offseason(req: GradeOffseasonRequest):
+    """Overall grade for the whole simulated offseason — every signing and release together."""
+    if not req.moves:
+        raise HTTPException(status_code=400, detail="No moves to grade yet")
+
+    move_lines = []
+    for m in req.moves:
+        if m.get("type") == "sign":
+            move_lines.append(
+                f"  SIGNED: {m.get('player_name')} ({m.get('position','?')}) — "
+                f"{m.get('years','?')}yr / ${m.get('aav_m',0):.1f}M AAV — graded {m.get('grade','?')} at the time"
+            )
+        else:
+            move_lines.append(
+                f"  RELEASED/TRADED AWAY: {m.get('player_name')} ({m.get('position','?')}) — "
+                f"freed ${m.get('salary_saved_m',0):.1f}M — graded {m.get('grade','?')} at the time"
+            )
+    moves_block = "\n".join(move_lines)
+
+    net_spend = req.starting_budget_m - req.final_budget_remaining_m
+
+    prompt = f"""You are an MLB front office analyst writing the final report card for a team's simulated offseason.
+
+TEAM: {req.team_name}
+STARTING BUDGET: ${req.starting_budget_m:.1f}M
+FINAL BUDGET REMAINING: ${req.final_budget_remaining_m:.1f}M (net spend: ${net_spend:.1f}M)
+
+ALL MOVES MADE THIS OFFSEASON:
+{moves_block}
+
+Grade the offseason as a whole — not move-by-move, but the overall strategy: did the team address its real
+needs, spend sensibly relative to budget, balance risk, and improve for next season? Respond with EXACTLY
+this format and nothing else:
+GRADE: [A+/A/A-/B+/B/B-/C+/C/C-/D/F]
+HEADLINE: [one sharp sentence, max 12 words, summarizing the offseason]
+ANALYSIS: [3-5 sentences on overall strategy, standout moves, and any gaps left unaddressed]"""
+
+    raw = await _ask_claude_for_grade(prompt, max_tokens=500)
+    return _parse_grade_response(raw)
 
 
 @router.post("/plan")

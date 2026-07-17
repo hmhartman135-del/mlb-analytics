@@ -753,6 +753,8 @@ export interface OffseasonContext {
   expiring_count: number;
 }
 
+export type ContractStatus = "signed" | "arbitration" | "pre_arb" | "free_agent";
+
 export interface OffseasonPlayer {
   player_id: string;
   name: string;
@@ -761,7 +763,11 @@ export interface OffseasonPlayer {
   salary_m: number;
   contract_years: number | null;
   years_remaining: number;
+  service_time: number | null;
   war: number;
+  status: ContractStatus;
+  est_arb_salary_m: number | null;
+  projected_2027_m: number;
 }
 
 export interface OffseasonFATarget {
@@ -795,6 +801,8 @@ export interface OffseasonContextResponse {
   context: OffseasonContext;
   expiring_contracts: OffseasonPlayer[];
   returning_contracts: OffseasonPlayer[];
+  roster: OffseasonPlayer[];
+  arbitration_eligible: OffseasonPlayer[];
   fa_pool: OffseasonFATarget[];
 }
 
@@ -831,6 +839,34 @@ export const offseasonApi = {
       grade: string;
     }>;
   }) => api.post<SigningGradeResponse>("/offseason/grade-move", payload),
+
+  gradeRelease: (payload: {
+    team_name: string;
+    player_name: string;
+    position?: string | null;
+    age?: number | null;
+    salary_m: number;
+    war: number;
+    service_time?: number | null;
+    status: ContractStatus;
+    est_arb_salary_m?: number | null;
+    budget_remaining_m: number;
+  }) => api.post<SigningGradeResponse>("/offseason/grade-release", payload),
+
+  gradeOffseason: (payload: {
+    team_name: string;
+    starting_budget_m: number;
+    final_budget_remaining_m: number;
+    moves: Array<{
+      type: "sign" | "release";
+      player_name: string;
+      position?: string | null;
+      years?: number;
+      aav_m?: number;
+      salary_saved_m?: number;
+      grade: string;
+    }>;
+  }) => api.post<SigningGradeResponse>("/offseason/grade-offseason", payload),
 };
 
 // --- Trade Types ---
