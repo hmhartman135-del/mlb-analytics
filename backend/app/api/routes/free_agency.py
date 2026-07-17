@@ -4,7 +4,9 @@ Free Agency routes
   GET /api/v1/free-agents/upcoming      — 2027 FA class scraped from Spotrac
 """
 
-from fastapi import APIRouter, Depends, Query
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +15,7 @@ from ...models.player import Player
 from ...models.stats import BattingStats, PitchingStats
 from ...models.team import Team
 from ...models.spotrac_fa import SpotracFA
+from ...services.free_agency_predictor import generate_signing_prediction
 
 router = APIRouter(prefix="/api/v1/free-agents", tags=["free-agency"])
 
@@ -246,3 +249,62 @@ async def list_upcoming_free_agents(
         "source": "spotrac.com",
         "upcoming": [_fmt(fa) for fa in rows],
     }
+
+
+# ── AI signing prediction ────────────────────────────────────────────────────
+# Speculative "who will/should sign this player" — grounded in real current
+# standings, but inherently a guess that will be superseded once real free
+# agency plays out. Not cached/persisted; regenerate on demand.
+
+@router.post("/player/{player_id}/predict-signing")
+async def predict_signing_current(player_id: UUID, db: AsyncSession = Depends(get_db)):
+    """For a current (already-unsigned) free agent — real Player row with real stats."""
+    result = await db.execute(select(Player).where(Player.id == player_id))
+    player = result.scalar_one_or_none()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    stats_map = await _attach_stats(db, [player])
+    s = stats_map.get(player.id)
+    stat_line = ""
+    if s is not None:
+        d = _batting(s) if isinstance(s, BattingStats) else _pitching(s)
+        stat_line = ", ".join(f"{k}: {v}" for k, v in d.items() if k not in ("type", "season") and v is not None)
+
+    context = (
+        f"Name: {player.full_name}\n"
+        f"Position: {player.position} | Bats/Throws: {player.bats}/{player.throws}\n"
+        f"Age: {player.age} | Service time: {player.service_time} years\n"
+    )
+    if player.salary:
+        context += f"Last known salary: ${player.salary:,.0f}\n"
+    if stat_line:
+        context += f"Most recent season stats: {stat_line}\n"
+
+    prediction = await generate_signing_prediction(context)
+    return {"player_id": str(player.id), "player_name": player.full_name, **prediction}
+
+
+@router.post("/upcoming/{fa_id}/predict-signing")
+async def predict_signing_upcoming(fa_id: UUID, db: AsyncSession = Depends(get_db)):
+    """For a post-2026 upcoming free agent (Spotrac-sourced) — lighter bio-only context,
+    since these rows aren't linked to a Player record with stats history."""
+    result = await db.execute(select(SpotracFA).where(SpotracFA.id == fa_id))
+    fa = result.scalar_one_or_none()
+    if not fa:
+        raise HTTPException(status_code=404, detail="Free agent not found")
+
+    context = (
+        f"Name: {fa.full_name}\n"
+        f"Position: {fa.position}\n"
+        f"Age: {fa.age}\n"
+        f"Current team (will become a free agent after the 2026 season): {fa.former_team}\n"
+        f"Free agency type: {fa.fa_type or 'Unknown'}\n"
+    )
+    if fa.aav:
+        context += f"Expected market value: ~${fa.aav:,.0f}/yr AAV\n"
+    if fa.contract_value:
+        context += f"Expected total contract value: ~${fa.contract_value:,.0f}M\n"
+
+    prediction = await generate_signing_prediction(context)
+    return {"player_id": str(fa.id), "player_name": fa.full_name, **prediction}

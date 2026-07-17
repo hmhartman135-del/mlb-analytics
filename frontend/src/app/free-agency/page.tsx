@@ -1,13 +1,14 @@
 "use client";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   freeAgencyApi,
   type FreeAgent,
   type FreeAgentStats,
   type SpotracFreeAgent,
+  type SigningPrediction,
 } from "@/lib/api";
-import { UserCheck, Search, ChevronLeft, ChevronRight, Flag, ExternalLink } from "lucide-react";
+import { UserCheck, Search, ChevronLeft, ChevronRight, Flag, ExternalLink, Sparkles, Loader2, ChevronDown } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -146,27 +147,104 @@ function StatHeader({ position }: { position: string | null }) {
   );
 }
 
+// ── AI signing prediction (shared expand-row content) ──────────────────────
+
+function SigningPredictionPanel({
+  colSpan, prediction, isPending, isError, onGenerate,
+}: {
+  colSpan: number;
+  prediction: SigningPrediction | undefined;
+  isPending: boolean;
+  isError: boolean;
+  onGenerate: () => void;
+}) {
+  return (
+    <tr className="border-b border-gray-800 bg-gray-950/60">
+      <td colSpan={colSpan} className="px-4 py-4">
+        {!prediction && !isPending && (
+          <button
+            onClick={onGenerate}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/20 transition-colors"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Who will they sign with?
+          </button>
+        )}
+        {isPending && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>Weighing standings, competitive windows, and roster fit…</span>
+          </div>
+        )}
+        {isError && <p className="text-xs text-red-400">Failed to generate a prediction. Try again.</p>}
+        {prediction && (
+          <div className="flex items-start gap-4">
+            <div className="shrink-0">
+              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">AI Predicts</p>
+              <span className="inline-block px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 font-semibold text-sm whitespace-nowrap">
+                {prediction.predicted_team}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">Reasoning</p>
+              <p className="text-sm text-gray-300 leading-relaxed">{prediction.reasoning}</p>
+              <p className="text-[10px] text-gray-600 mt-2 italic">
+                Speculative — a real guess based on current standings, not a lock. Will likely change as free agency actually plays out.
+              </p>
+            </div>
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 function FaRow({ player }: { player: FreeAgent }) {
   const isPitcher = player.position === "SP" || player.position === "RP";
+  const [expanded, setExpanded] = useState(false);
+
+  const { mutate, data: prediction, isPending, isError } = useMutation({
+    mutationFn: () => freeAgencyApi.predictSigningCurrent(player.id).then(r => r.data),
+  });
+
   return (
-    <tr className="border-b border-gray-800 hover:bg-gray-800/40 transition-colors">
-      <td className="py-3 pr-4">
-        <div className="font-medium text-gray-100">{player.full_name}</div>
-        <div className="text-[11px] text-gray-500 mt-0.5">
-          {[player.age ? `Age ${player.age}` : null, player.birth_country].filter(Boolean).join(" · ")}
-        </div>
-      </td>
-      <td className="py-3 pr-3"><PosBadge pos={player.position} /></td>
-      <td className="py-3 pr-3 text-gray-400 text-sm">
-        {isPitcher
-          ? (player.throws ?? "—")
-          : `${player.bats ?? "?"}/${player.throws ?? "?"}`}
-      </td>
-      <td className="py-3 pr-3 font-mono text-sm text-gray-300">{fmtSvc(player.service_time)}</td>
-      <td className="py-3 pr-3 font-mono text-sm text-gray-300">{fmtM(player.salary)}</td>
-      <td className="py-3 pr-3 text-gray-400 text-xs">{player.team_name ?? "—"}</td>
-      <StatsCells stats={player.stats} position={player.position} />
-    </tr>
+    <>
+      <tr
+        onClick={() => setExpanded(e => !e)}
+        className="border-b border-gray-800 hover:bg-gray-800/40 transition-colors cursor-pointer"
+      >
+        <td className="py-3 pr-4">
+          <div className="flex items-center gap-1.5">
+            <ChevronDown className={`h-3.5 w-3.5 text-gray-600 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+            <div>
+              <div className="font-medium text-gray-100">{player.full_name}</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                {[player.age ? `Age ${player.age}` : null, player.birth_country].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+          </div>
+        </td>
+        <td className="py-3 pr-3"><PosBadge pos={player.position} /></td>
+        <td className="py-3 pr-3 text-gray-400 text-sm">
+          {isPitcher
+            ? (player.throws ?? "—")
+            : `${player.bats ?? "?"}/${player.throws ?? "?"}`}
+        </td>
+        <td className="py-3 pr-3 font-mono text-sm text-gray-300">{fmtSvc(player.service_time)}</td>
+        <td className="py-3 pr-3 font-mono text-sm text-gray-300">{fmtM(player.salary)}</td>
+        <td className="py-3 pr-3 text-gray-400 text-xs">{player.team_name ?? "—"}</td>
+        <StatsCells stats={player.stats} position={player.position} />
+      </tr>
+      {expanded && (
+        <SigningPredictionPanel
+          colSpan={12}
+          prediction={prediction}
+          isPending={isPending}
+          isError={isError}
+          onGenerate={() => mutate()}
+        />
+      )}
+    </>
   );
 }
 
@@ -353,38 +431,66 @@ function FaTypeBadge({ type }: { type: string | null }) {
 }
 
 function UpcomingRow({ fa }: { fa: SpotracFreeAgent }) {
+  const [expanded, setExpanded] = useState(false);
+  const canPredict = !fa.signed;
+
+  const { mutate, data: prediction, isPending, isError } = useMutation({
+    mutationFn: () => freeAgencyApi.predictSigningUpcoming(fa.id).then(r => r.data),
+  });
+
   return (
-    <tr className="border-b border-gray-800 hover:bg-gray-800/40 transition-colors">
-      <td className="py-3 pr-4">
-        <div className="font-medium text-gray-100">{fa.full_name}</div>
-        {fa.age != null && (
-          <div className="text-[11px] text-gray-500 mt-0.5">Age {fa.age.toFixed(1)}</div>
-        )}
-      </td>
-      <td className="py-3 pr-3"><PosBadge pos={fa.position} /></td>
-      <td className="py-3 pr-3 text-gray-400 text-sm font-mono">{fa.former_team ?? "—"}</td>
-      <td className="py-3 pr-3"><FaTypeBadge type={fa.fa_type} /></td>
-      <td className="py-3 pr-3">
-        {fa.signed ? (
-          <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30">
-            Signed
-          </span>
-        ) : (
-          <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-            Unsigned
-          </span>
-        )}
-      </td>
-      <td className="py-3 pr-3 font-mono text-sm text-gray-300">
-        {fa.contract_years != null ? `${fa.contract_years} yr` : "—"}
-      </td>
-      <td className="py-3 pr-3 font-mono text-sm text-gray-300">
-        {fa.aav != null ? fmtM(fa.aav) : "—"}
-      </td>
-      <td className="py-3 pr-3 font-mono text-sm text-gray-400">
-        {fa.contract_value != null ? fmtM(fa.contract_value) : "—"}
-      </td>
-    </tr>
+    <>
+      <tr
+        onClick={() => canPredict && setExpanded(e => !e)}
+        className={`border-b border-gray-800 hover:bg-gray-800/40 transition-colors ${canPredict ? "cursor-pointer" : ""}`}
+      >
+        <td className="py-3 pr-4">
+          <div className="flex items-center gap-1.5">
+            {canPredict && (
+              <ChevronDown className={`h-3.5 w-3.5 text-gray-600 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+            )}
+            <div>
+              <div className="font-medium text-gray-100">{fa.full_name}</div>
+              {fa.age != null && (
+                <div className="text-[11px] text-gray-500 mt-0.5">Age {fa.age.toFixed(1)}</div>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="py-3 pr-3"><PosBadge pos={fa.position} /></td>
+        <td className="py-3 pr-3 text-gray-400 text-sm font-mono">{fa.former_team ?? "—"}</td>
+        <td className="py-3 pr-3"><FaTypeBadge type={fa.fa_type} /></td>
+        <td className="py-3 pr-3">
+          {fa.signed ? (
+            <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30">
+              Signed
+            </span>
+          ) : (
+            <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              Unsigned
+            </span>
+          )}
+        </td>
+        <td className="py-3 pr-3 font-mono text-sm text-gray-300">
+          {fa.contract_years != null ? `${fa.contract_years} yr` : "—"}
+        </td>
+        <td className="py-3 pr-3 font-mono text-sm text-gray-300">
+          {fa.aav != null ? fmtM(fa.aav) : "—"}
+        </td>
+        <td className="py-3 pr-3 font-mono text-sm text-gray-400">
+          {fa.contract_value != null ? fmtM(fa.contract_value) : "—"}
+        </td>
+      </tr>
+      {expanded && canPredict && (
+        <SigningPredictionPanel
+          colSpan={8}
+          prediction={prediction}
+          isPending={isPending}
+          isError={isError}
+          onGenerate={() => mutate()}
+        />
+      )}
+    </>
   );
 }
 

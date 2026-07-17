@@ -1030,7 +1030,20 @@ export const freeAgencyApi = {
     limit?: number;
   }) =>
     api.get<UpcomingFreeAgentsResponse>("/free-agents/upcoming", { params }),
+
+  predictSigningCurrent: (playerId: string) =>
+    api.post<SigningPrediction>(`/free-agents/player/${playerId}/predict-signing`),
+
+  predictSigningUpcoming: (faId: string) =>
+    api.post<SigningPrediction>(`/free-agents/upcoming/${faId}/predict-signing`),
 };
+
+export interface SigningPrediction {
+  player_id: string;
+  player_name: string;
+  predicted_team: string;
+  reasoning: string;
+}
 
 // --- Live Sync ---
 
