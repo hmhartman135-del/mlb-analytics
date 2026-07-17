@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, Boolean, Date, Enum, ForeignKey, JSON
+from sqlalchemy import String, Integer, Float, Boolean, Date, DateTime, Enum, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -90,6 +90,15 @@ class Player(Base):
     scout_overall: Mapped[int | None] = mapped_column(Integer)
     scout_notes: Mapped[str | None] = mapped_column(String(2048))
 
-    team: Mapped["Team"] = relationship("Team", back_populates="players")
+    # Real completed draft results (distinct from the forward-looking mock-draft
+    # prospect pool) — which team actually drafted them, which round, and a
+    # cached AI-written background/stats explanation for that pick.
+    draft_team_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"))
+    draft_round: Mapped[str | None] = mapped_column(String(10))  # "1", "2", "PPI", "CB-A", etc.
+    ai_draft_blurb: Mapped[str | None] = mapped_column(String(4000))
+    ai_draft_blurb_generated_at: Mapped[DateTime | None] = mapped_column(DateTime)
+
+    team: Mapped["Team"] = relationship("Team", back_populates="players", foreign_keys="Player.team_id")
+    draft_team: Mapped["Team"] = relationship("Team", foreign_keys="Player.draft_team_id")
     batting_stats: Mapped[list["BattingStats"]] = relationship("BattingStats", back_populates="player")
     pitching_stats: Mapped[list["PitchingStats"]] = relationship("PitchingStats", back_populates="player")

@@ -671,6 +671,63 @@ export const draftApi = {
   }) => api.post<DraftGradeResponse>("/draft/grade", payload),
 };
 
+// --- Real Draft Results Types (completed draft, e.g. 2026) ---
+
+export interface DraftResultPick {
+  id: string;
+  mlb_id: number;
+  full_name: string;
+  position: string | null;
+  bats: string | null;
+  throws: string | null;
+  age: number | null;
+  height: string | null;
+  weight: number | null;
+  birth_city: string | null;
+  birth_country: string | null;
+  school: string | null;
+  school_class: string | null;
+  draft_year: number;
+  draft_round: string;
+  draft_pick: number | null;
+  draft_rank: number | null;
+  signing_bonus: number | null;
+  draft_team_id: string | null;
+  scout_notes: string | null;
+  ai_draft_blurb: string | null;
+  ai_draft_blurb_generated_at: string | null;
+}
+
+export interface TeamDraftClassResponse {
+  year: number;
+  team_id: string;
+  picks: DraftResultPick[];
+  grade: string | null;
+  analysis: string | null;
+  grade_generated_at: string | null;
+}
+
+export const draftResultsApi = {
+  listPicks: (year: number, params?: { round?: string; team_id?: string }) =>
+    api.get<DraftResultPick[]>(`/draft-results/${year}`, { params }),
+
+  listRounds: (year: number) =>
+    api.get<string[]>(`/draft-results/${year}/rounds`),
+
+  teamClass: (year: number, teamId: string) =>
+    api.get<TeamDraftClassResponse>(`/draft-results/${year}/team/${teamId}`),
+
+  gradeTeam: (year: number, teamId: string) =>
+    api.post<{ team_id: string; year: number; grade: string; analysis: string; generated_at: string }>(
+      `/draft-results/${year}/team/${teamId}/grade`
+    ),
+
+  explainPick: (playerId: string) =>
+    api.post<{ player_id: string; explanation: string; generated_at: string }>(
+      `/draft-results/player/${playerId}/explain`
+    ),
+};
+
 // --- Offseason Types ---
 
 export interface OffseasonContext {

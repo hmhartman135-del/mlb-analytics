@@ -1,12 +1,13 @@
 "use client";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { scoutingApi, teamsApi, draftApi, standingsApi, type Prospect, type CareerRow, type Team, type DraftPlanResponse, type DraftDepthRow, type MockDraftPick, type MockDraftResponse, type DraftGradeResponse } from "@/lib/api";
+import { scoutingApi, teamsApi, draftApi, draftResultsApi, standingsApi, type Prospect, type CareerRow, type Team, type DraftPlanResponse, type DraftDepthRow, type MockDraftPick, type MockDraftResponse, type DraftGradeResponse, type DraftResultPick, type TeamDraftClassResponse } from "@/lib/api";
 import {
   BookOpen, Search, ChevronLeft, ChevronRight, FileText, RefreshCw,
   MapPin, Ruler, Weight, GraduationCap, Calendar, User, X,
   Briefcase, ChevronDown, Loader2, Target, AlertCircle, TrendingUp,
   ArrowUp, ArrowDown, Zap, RotateCcw, CheckCircle2, ChevronsRight, Award,
+  Users, Sparkles, DollarSign,
 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -2262,7 +2263,7 @@ function ManualMockDraftPanel() {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-export default function DraftPage() {
+function MockDraftPlanner() {
   const [activeTab, setActiveTab] = useState<"prospects" | "planner" | "mock" | "manual">("prospects");
   const [search, setSearch]           = useState("");
   const [debouncedSearch, setDebounced] = useState("");
@@ -2509,5 +2510,264 @@ export default function DraftPage() {
       </div>
       )}
     </div>
+  );
+}
+
+// ── Real 2026 Draft Results ─────────────────────────────────────────────────────
+// Real completed draft (MLB Stats API), distinct from the mock-draft planner
+// above. One pick row can be expanded for an AI-written background/stats
+// explanation; selecting a team shows its full class + an AI overall grade.
+
+const REAL_DRAFT_YEAR = 2026;
+
+function draftBonusStr(v: number | null) {
+  if (!v) return null;
+  return `$${(v / 1_000_000).toFixed(2)}M`;
+}
+
+function gradeLetterClass(g: string | null) {
+  if (!g) return "text-gray-500";
+  if (g.startsWith("A")) return "text-green-400";
+  if (g.startsWith("B")) return "text-blue-400";
+  if (g.startsWith("C")) return "text-amber-400";
+  return "text-red-400";
+}
+
+function PickRow({ pick, teamAbbr }: { pick: DraftResultPick; teamAbbr?: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const explainMutation = useMutation({
+    mutationFn: () => draftResultsApi.explainPick(pick.id).then(r => r.data),
+  });
+
+  const handleToggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !pick.ai_draft_blurb && !explainMutation.data) {
+      explainMutation.mutate();
+    }
+  };
+
+  const blurb = explainMutation.data?.explanation ?? pick.ai_draft_blurb;
+
+  return (
+    <div className="border-b border-gray-800">
+      <button
+        onClick={handleToggle}
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-900/60 transition-colors"
+      >
+        <span className="w-14 shrink-0 text-xs text-gray-500 font-mono">
+          Rd {pick.draft_round}
+        </span>
+        <span className="w-12 shrink-0 text-xs text-gray-500 font-mono">
+          #{pick.draft_pick ?? "—"}
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="font-medium text-gray-100">{pick.full_name}</span>
+          {teamAbbr && <span className="ml-2 text-xs text-gray-500">{teamAbbr}</span>}
+        </span>
+        <span className="w-10 shrink-0 text-xs text-amber-400 font-mono">{pick.position ?? "—"}</span>
+        <span className="hidden sm:block flex-1 min-w-0 text-xs text-gray-400 truncate">
+          {pick.school ?? "—"}
+        </span>
+        <span className="hidden md:block w-20 shrink-0 text-xs text-gray-500 text-right">
+          {draftBonusStr(pick.signing_bonus) ?? "—"}
+        </span>
+        <ChevronDown className={`h-4 w-4 text-gray-500 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 bg-gray-950/50">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-2">
+            {pick.age && <span>Age {pick.age}</span>}
+            {pick.height && pick.weight && <span>{pick.height}, {pick.weight} lbs</span>}
+            {pick.bats && pick.throws && <span>B/T: {pick.bats}/{pick.throws}</span>}
+            {pick.birth_city && <span>From {pick.birth_city}{pick.birth_country && pick.birth_country !== "USA" ? `, ${pick.birth_country}` : ""}</span>}
+            {pick.school_class && <span>{pick.school_class}</span>}
+            {pick.draft_rank && <span>Pre-draft rank #{pick.draft_rank}</span>}
+          </div>
+          {explainMutation.isPending && !blurb ? (
+            <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>Writing background & stats explanation…</span>
+            </div>
+          ) : blurb ? (
+            <div className="space-y-2">
+              {blurb.split("\n\n").map((para, i) => (
+                <p key={i} className="text-sm text-gray-300 leading-relaxed">{para}</p>
+              ))}
+            </div>
+          ) : explainMutation.isError ? (
+            <p className="text-xs text-red-400">Failed to generate explanation. Try again.</p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RealDraftResults() {
+  const [teamId, setTeamId] = useState<string>("");
+  const [round, setRound] = useState<string>("");
+
+  const { data: teamsData } = useQuery({
+    queryKey: ["draft-results-teams"],
+    queryFn: () => teamsApi.list("MLB").then(r => r.data.teams),
+  });
+  const teams = teamsData ?? [];
+  const teamById = useMemo(() => Object.fromEntries(teams.map(t => [t.id, t])), [teams]);
+
+  const { data: rounds } = useQuery({
+    queryKey: ["draft-results-rounds", REAL_DRAFT_YEAR],
+    queryFn: () => draftResultsApi.listRounds(REAL_DRAFT_YEAR).then(r => r.data),
+  });
+
+  const { data: allPicks, isLoading: picksLoading } = useQuery({
+    queryKey: ["draft-results-picks", REAL_DRAFT_YEAR, round],
+    queryFn: () => draftResultsApi.listPicks(REAL_DRAFT_YEAR, round ? { round } : undefined).then(r => r.data),
+    enabled: !teamId,
+  });
+
+  const { data: teamClass, isLoading: teamLoading, refetch: refetchTeamClass } = useQuery({
+    queryKey: ["draft-results-team-class", REAL_DRAFT_YEAR, teamId],
+    queryFn: () => draftResultsApi.teamClass(REAL_DRAFT_YEAR, teamId).then(r => r.data),
+    enabled: !!teamId,
+  });
+
+  const gradeMutation = useMutation({
+    mutationFn: () => draftResultsApi.gradeTeam(REAL_DRAFT_YEAR, teamId).then(r => r.data),
+    onSuccess: () => refetchTeamClass(),
+  });
+
+  const selectedTeam = teamId ? teamById[teamId] : null;
+  const displayGrade = gradeMutation.data?.grade ?? teamClass?.grade;
+  const displayAnalysis = gradeMutation.data?.analysis ?? teamClass?.analysis;
+
+  return (
+    <div className="-m-6 flex flex-col h-screen overflow-hidden">
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 px-5 pt-3 pb-3 border-b border-gray-800 shrink-0 bg-gray-950">
+        <BookOpen className="h-5 w-5 text-amber-400 shrink-0" />
+        <h1 className="text-lg font-bold mr-2 shrink-0">Draft — {REAL_DRAFT_YEAR} Results</h1>
+        <Users className="h-4 w-4 text-gray-500 shrink-0" />
+        <select
+          value={teamId}
+          onChange={(e) => setTeamId(e.target.value)}
+          className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200"
+        >
+          <option value="">All Teams — Full Draft Board</option>
+          {teams.map(t => (
+            <option key={t.id} value={t.id}>{t.full_name}</option>
+          ))}
+        </select>
+
+        {!teamId && (
+          <select
+            value={round}
+            onChange={(e) => setRound(e.target.value)}
+            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200"
+          >
+            <option value="">All Rounds</option>
+            {(rounds ?? []).map(r => (
+              <option key={r} value={r}>Round {r}</option>
+            ))}
+          </select>
+        )}
+
+        {teamId && (
+          <button
+            onClick={() => gradeMutation.mutate()}
+            disabled={gradeMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            {gradeMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {displayGrade ? "Re-grade This Draft" : "Grade This Draft"}
+          </button>
+        )}
+      </div>
+
+      {/* Team grade card */}
+      {teamId && (displayGrade || gradeMutation.isPending) && (
+        <div className="px-5 py-4 border-b border-gray-800 bg-gray-900/40 shrink-0">
+          {gradeMutation.isPending && !displayGrade ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Analyzing {selectedTeam?.full_name}'s draft class…</span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 text-center">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Draft Grade</p>
+                <span className={`text-3xl font-bold ${gradeLetterClass(displayGrade ?? null)}`}>{displayGrade}</span>
+              </div>
+              <div className="flex-1 space-y-2">
+                {(displayAnalysis ?? "").split("\n\n").map((para, i) => (
+                  <p key={i} className="text-sm text-gray-300 leading-relaxed">{para}</p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Picks list */}
+      <div className="flex-1 overflow-y-auto">
+        {teamId ? (
+          teamLoading ? (
+            <div className="flex items-center justify-center h-40 text-gray-500 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading {selectedTeam?.full_name}'s picks…
+            </div>
+          ) : !teamClass?.picks.length ? (
+            <div className="flex items-center justify-center h-40 text-gray-500 text-sm">
+              No {REAL_DRAFT_YEAR} picks found for this team.
+            </div>
+          ) : (
+            teamClass.picks.map(p => <PickRow key={p.id} pick={p} />)
+          )
+        ) : picksLoading ? (
+          <div className="flex items-center justify-center h-40 text-gray-500 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading {REAL_DRAFT_YEAR} draft board…
+          </div>
+        ) : !allPicks?.length ? (
+          <div className="flex items-center justify-center h-40 text-gray-500 text-sm">
+            No {REAL_DRAFT_YEAR} picks loaded yet.
+          </div>
+        ) : (
+          allPicks.map(p => (
+            <PickRow key={p.id} pick={p} teamAbbr={p.draft_team_id ? teamById[p.draft_team_id]?.abbreviation : undefined} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Page (top-level 2026 / 2027 switcher) ───────────────────────────────────────
+
+export default function DraftPage() {
+  const [year, setYear] = useState<"2026" | "2027">("2026");
+
+  return (
+    <>
+      {/* Floating year switcher — sits above whichever view is active without
+          altering that view's own layout (the 2027 planner below is a
+          self-contained full-screen component left completely untouched). */}
+      <div className="fixed top-3 right-6 z-50 flex items-center gap-1 bg-gray-950 border border-gray-800 rounded-lg p-1 shadow-lg">
+        {(["2026", "2027"] as const).map((y) => (
+          <button
+            key={y}
+            onClick={() => setYear(y)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+              year === y
+                ? "bg-amber-500/20 text-amber-400"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            {y === "2026" ? "2026 Draft (Results)" : "2027 Draft (Planner)"}
+          </button>
+        ))}
+      </div>
+      {year === "2026" ? <RealDraftResults /> : <MockDraftPlanner />}
+    </>
   );
 }

@@ -3,18 +3,18 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from .api.routes import players, lineups, roster, scouting, analytics, teams, free_agency, standings, offseason, draft, trades, sync
+from .api.routes import players, lineups, roster, scouting, analytics, teams, free_agency, standings, offseason, draft, draft_results, trades, sync
 from .models import spotrac_fa  # noqa — ensures table is registered with Base metadata
+from .models import draft_team_grade  # noqa — ensures table is registered with Base metadata
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Pure yield — no DB operations at startup.
-    # Tables already exist on Railway; this ensures INSTANT startup every time.
     print("[startup] MLB Analytics API starting…", flush=True)
     print(f"[startup] DATABASE_URL configured: {'yes' if os.getenv('DATABASE_URL') else 'no (local default)'}", flush=True)
+    await sync.maybe_auto_sync()
     yield
     print("[shutdown] MLB Analytics API shutting down.", flush=True)
 
@@ -48,6 +48,7 @@ app.include_router(free_agency.router)
 app.include_router(standings.router)
 app.include_router(offseason.router, prefix="/api/v1")
 app.include_router(draft.router, prefix="/api/v1")
+app.include_router(draft_results.router, prefix="/api/v1")
 app.include_router(trades.router, prefix="/api/v1")
 app.include_router(sync.router)
 

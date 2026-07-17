@@ -25,4 +25,4 @@ class Team(Base):
     sport_id: Mapped[int | None] = mapped_column(Integer)           # MLB Stats API sport ID
     affiliate_mlb_id: Mapped[int | None] = mapped_column(Integer)   # parent MLB team's mlb_id
 
-    players: Mapped[list["Player"]] = relationship("Player", back_populates="team")
+    players: Mapped[list["Player"]] = relationship("Player", back_populates="team", foreign_keys="Player.team_id")
