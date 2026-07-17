@@ -122,7 +122,7 @@ function fmtPct(v: number | null | undefined) {
 // ── Level badge ────────────────────────────────────────────────────────────────
 
 function LevelBadge({ level, status }: { level: string | null; status: string }) {
-  if (status === "draft_prospect") {
+  if (status === "draft_prospect" || status.startsWith("drafted_")) {
     return (
       <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30">
         Draft
@@ -733,7 +733,8 @@ export default function ScoutingPage() {
                 {total.toLocaleString()} players
                 {isTop100 && " · Overall top-100 prospects by age-adjusted score"}
                 {isTop30 && ` · ${selectedOrg} top-30 org prospects`}
-                {!isTop100 && !isTop30 && " · Minor leagues, college, draft & international"}
+                {activeTab === "draft_prospect" && " · Just drafted (2026 MLB Draft)"}
+                {!isTop100 && !isTop30 && activeTab !== "draft_prospect" && " · Minor leagues, college, draft & international"}
               </p>
             </div>
           </div>

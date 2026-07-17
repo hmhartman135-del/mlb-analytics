@@ -113,6 +113,11 @@ async def list_prospects(
         )
     elif ranked_only:
         q = select(Player).where(Player.draft_rank.isnot(None))
+    elif level == "draft_prospect":
+        # "Draft" tab = players actually just drafted (status="drafted_2026"
+        # etc.), not the broader speculative draft-eligible pool used by
+        # the 2027 mock-draft planner.
+        q = select(Player).where(Player.status.like("drafted_%"))
     else:
         q = select(Player).where(Player.status.in_(["draft_prospect", "minors"]))
 
@@ -126,11 +131,8 @@ async def list_prospects(
         q = q.where(Player.school_class == school_class)
     if org and not top30_org:
         q = q.where(Player.parent_org_abbr == org.upper())
-    if not ranked_only and not top100 and not top30_org:
-        if level == "draft_prospect":
-            q = q.where(Player.status == "draft_prospect")
-        elif level:
-            q = q.where(Player.minor_league_level == level)
+    if not ranked_only and not top100 and not top30_org and level and level != "draft_prospect":
+        q = q.where(Player.minor_league_level == level)
     if country:
         q = q.where(Player.birth_country.ilike(f"%{country}%"))
     if search:
@@ -147,7 +149,7 @@ async def list_prospects(
     elif ranked_only:
         q = q.order_by(Player.draft_rank.asc().nulls_last(), Player.full_name)
     elif level == "draft_prospect":
-        q = q.order_by(Player.draft_rank.asc().nulls_last(), Player.full_name)
+        q = q.order_by(Player.draft_pick.asc().nulls_last(), Player.full_name)
     else:
         q = q.order_by(Player.scout_overall.desc().nulls_last(), Player.full_name)
 
