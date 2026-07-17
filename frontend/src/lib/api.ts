@@ -1122,3 +1122,94 @@ export const powerRankingsApi = {
   generate: (season: number) =>
     api.post<PowerRankingsResponse>("/power-rankings", null, { params: { season } }),
 };
+
+// --- Schedule ---
+
+export interface GamePrediction {
+  predicted_winner: string;
+  confidence: string;
+  reasoning: string;
+  generated_at: string;
+}
+
+export interface ScheduleGame {
+  game_pk: number;
+  game_date: string;
+  status: "scheduled" | "live" | "final" | string;
+  detailed_state: string | null;
+  venue: string | null;
+  away_team: string;
+  away_abbr: string;
+  home_team: string;
+  home_abbr: string;
+  away_score: number | null;
+  home_score: number | null;
+  away_record: string | null;
+  home_record: string | null;
+  away_probable_pitcher: string | null;
+  home_probable_pitcher: string | null;
+  winning_pitcher: string | null;
+  losing_pitcher: string | null;
+  save_pitcher: string | null;
+  prediction: GamePrediction | null;
+}
+
+export interface ScheduleResponse {
+  date: string;
+  games: ScheduleGame[];
+}
+
+export interface BoxScoreBatter {
+  name: string;
+  position: string | null;
+  ab: number;
+  r: number;
+  h: number;
+  rbi: number;
+  bb: number;
+  so: number;
+  summary: string;
+}
+
+export interface BoxScorePitcher {
+  name: string;
+  ip: string;
+  h: number;
+  r: number;
+  er: number;
+  bb: number;
+  so: number;
+  decision: string;
+  summary: string;
+}
+
+export interface BoxScoreTeam {
+  runs: number;
+  hits: number;
+  errors: number;
+  left_on_base: number;
+  batters: BoxScoreBatter[];
+  pitchers: BoxScorePitcher[];
+}
+
+export interface BoxScoreInning {
+  num: number;
+  away: number | null;
+  home: number | null;
+}
+
+export interface BoxScoreResponse {
+  game_pk: number;
+  innings: BoxScoreInning[];
+  away: BoxScoreTeam;
+  home: BoxScoreTeam;
+}
+
+export const scheduleApi = {
+  get: (date: string) =>
+    api.get<ScheduleResponse>("/schedule", { params: { date } }),
+  predict: (gamePk: number) =>
+    api.post<GamePrediction>(`/schedule/game/${gamePk}/predict`),
+  boxscore: (gamePk: number) =>
+    api.get<BoxScoreResponse>(`/schedule/game/${gamePk}/boxscore`),
+};

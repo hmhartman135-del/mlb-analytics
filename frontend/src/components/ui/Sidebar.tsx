@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, ClipboardList, Users, Target, TrendingUp, User, UserCheck, BookOpen, Trophy, Briefcase, ArrowLeftRight, Flame } from "lucide-react";
+import { Activity, ClipboardList, Users, Target, TrendingUp, User, UserCheck, BookOpen, Trophy, Briefcase, ArrowLeftRight, Flame, CalendarDays } from "lucide-react";
 import clsx from "clsx";
 
 const nav = [
   { href: "/", icon: Activity, label: "Dashboard" },
+  { href: "/schedule", icon: CalendarDays, label: "Schedule" },
   { href: "/lineup", icon: ClipboardList, label: "Lineup" },
   { href: "/roster", icon: Users, label: "Roster" },
   { href: "/scouting", icon: Target, label: "Scouting" },
