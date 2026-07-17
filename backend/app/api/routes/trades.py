@@ -330,12 +330,53 @@ def _standings_snapshot(standings: dict) -> tuple[list[dict], list[dict]]:
     return buyers, sellers
 
 
+async def _prospects_by_org(db: AsyncSession, top_n: int = 8) -> dict[str, list[dict]]:
+    """Real, current farm-system prospects grouped by parent MLB org (abbr),
+    top N per org by org_prospect_rank. Used to ground AI-proposed trade
+    packages in actual minor leaguers instead of invented names."""
+    res = await db.execute(
+        select(Player).where(
+            Player.status.in_(["minors", "draft_prospect"]),
+            Player.org_prospect_rank.isnot(None),
+            Player.parent_org_abbr.isnot(None),
+        ).order_by(Player.parent_org_abbr, Player.org_prospect_rank.asc())
+    )
+    by_org: dict[str, list[dict]] = {}
+    for p in res.scalars().all():
+        bucket = by_org.setdefault(p.parent_org_abbr, [])
+        if len(bucket) < top_n:
+            bucket.append({
+                "name": p.full_name,
+                "position": p.position or "?",
+                "age": p.age,
+                "level": p.minor_league_level or "?",
+                "org_rank": p.org_prospect_rank,
+            })
+    return by_org
+
+
+def _prospects_block(by_org: dict[str, list[dict]]) -> str:
+    lines = ["=== REAL FARM SYSTEM PROSPECTS BY TEAM ===",
+             "When a return package includes a prospect, you MUST pick an actual name from that "
+             "team's list below and describe them with their real position/age/level — never invent "
+             "a prospect name or description. If a fitting prospect isn't in the list, build the "
+             "package from MLB-ready players or draft picks instead."]
+    for org, prospects in sorted(by_org.items()):
+        entries = ", ".join(
+            f"{pr['name']} ({pr['position']}, {pr['age'] or '?'}, {pr['level']}, #{pr['org_rank']} org)"
+            for pr in prospects
+        )
+        lines.append(f"{org}: {entries}")
+    return "\n".join(lines)
+
+
 def _build_finder_prompt(
     p,
     bat: "BattingStats | None",
     pit: "PitchingStats | None",
     team_name: str,
     standings: dict | None,
+    prospects_block: str = "",
 ) -> str:
     is_pit = p.position in ("SP", "RP")
     war        = _war_pit(pit) if is_pit else _war_bat(bat)
@@ -387,10 +428,14 @@ Likely sellers (rebuilding): {seller_names}
   2026 stats: {stats_str}
   Estimated WAR: {war:+.1f}
 {standings_block}
+{prospects_block}
+
 === YOUR TASK ===
 Generate exactly 4 realistic trade proposals for {p.full_name}. For each:
   1. Identify a specific MLB team that genuinely needs this player (position, skill set, playoff window).
-  2. Construct a fair return package that {team_name} would realistically receive — include specific prospect tiers (e.g. "top-5 org SP prospect, 22"), cost-controlled MLB players, or draft picks.
+  2. Construct a fair return package that {team_name} would realistically receive — a real prospect
+     from the acquiring team's list above (named, with real position/age/level), a cost-controlled
+     MLB player, or a draft pick.
   3. Factor in standings: buyers pay more to win now; sellers demand premium youth.
   4. Make each proposal represent a distinct scenario (best offer / fair market / team-friendly / dark-horse).
 
@@ -399,7 +444,7 @@ Respond in EXACTLY this format (4 proposals separated by ---):
 PROPOSAL 1
 ACQUIRING: [Full Team Name] ([ABBR])
 WHY: [one sentence: why this team specifically wants this player right now]
-PACKAGE: [what {team_name} receives — comma-separated items, each described as "Label (detail)"]
+PACKAGE: [what {team_name} receives — items separated by " ; ", each described as "Name (detail)"]
 BUYER_GRADE: [A+/A/A-/B+/B/B-/C+/C/C-/D/F]
 SELLER_GRADE: [A+/A/A-/B+/B/B-/C+/C/C-/D/F]
 ANALYSIS: [2-3 sentences on deal balance, what each side gains, and real-world feasibility]
@@ -487,8 +532,12 @@ async def find_trades(
     except Exception:
         pass  # Claude will fall back to built-in baseball knowledge
 
-    # ── 5. Call Claude ─────────────────────────────────────────────────────────
-    prompt = _build_finder_prompt(p, bat, pit, team_name, standings)
+    # ── 5. Real farm-system prospects, grouped by org ─────────────────────────
+    prospects_by_org = await _prospects_by_org(db)
+    prospects_block = _prospects_block(prospects_by_org)
+
+    # ── 6. Call Claude ─────────────────────────────────────────────────────────
+    prompt = _build_finder_prompt(p, bat, pit, team_name, standings, prospects_block)
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
@@ -529,7 +578,7 @@ async def find_trades(
         acquiring_team = re.sub(r"\s*\([A-Z]{2,4}\)\s*$", "", acq_raw).strip()
 
         package_raw   = pkg_m.group(1).strip() if pkg_m else ""
-        package_items = [s.strip() for s in package_raw.split(",") if s.strip()]
+        package_items = [s.strip() for s in package_raw.split(";") if s.strip()]
 
         proposals.append({
             "acquiring_team":      acquiring_team,
@@ -571,6 +620,7 @@ def _build_advisor_prompt(
     team_abbr: str,
     players: list,         # list of (Player, bat | None, pit | None)
     standings: dict | None,
+    prospects_block: str = "",
 ) -> str:
     # ── Standing context ───────────────────────────────────────────────────────
     standing_block = ""
@@ -645,12 +695,18 @@ Position Players:
 Pitchers:
 {pit_lines}
 
+{prospects_block}
+
 === YOUR TASK{hint_txt} ===
 Based on the team's record, roster composition, and contract situations:
 1. Decide their overall trade direction.
 2. Identify 3 specific players to consider trading away (be realistic — value surplus, expiring contracts, positional depth).
 3. Identify 3 positions/types to target via trade.
 4. Write a strategic analysis.
+
+When SELL_RETURN mentions a prospect coming back, pick an actual name from the real farm-system list
+above (any team could plausibly be the trade partner) and describe them with their real position/age/
+level — never invent a prospect name.
 
 Respond in EXACTLY this format:
 
@@ -753,8 +809,11 @@ async def team_advisor(
     except Exception:
         pass
 
-    # ── 5. Call Claude ─────────────────────────────────────────────────────────
-    prompt = _build_advisor_prompt(team_name, team_abbr, players_ctx, standings)
+    # ── 5. Real farm-system prospects, grouped by org ─────────────────────────
+    prospects_block = _prospects_block(await _prospects_by_org(db))
+
+    # ── 6. Call Claude ─────────────────────────────────────────────────────────
+    prompt = _build_advisor_prompt(team_name, team_abbr, players_ctx, standings, prospects_block)
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
