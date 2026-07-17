@@ -27,7 +27,7 @@ git push -u origin main
 1. Go to [railway.app](https://railway.app) and sign in with GitHub
 2. Click **"New Project"** → **"Deploy from GitHub repo"**
 3. Select your `mlb-analytics` repo
-4. Railway asks which directory — type **`backend`**
+4. Leave the root directory as `/` (repo root) — the root `Dockerfile` copies `backend/` into the image itself, so Railway should build from the repo root, not the `backend` subfolder
 5. It detects the Dockerfile and starts building
 
 ### Add PostgreSQL database
